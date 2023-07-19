@@ -1,0 +1,6 @@
+literature/*
+.DS_Store
+__pycache__/
+*.xlsx
+*.pptx
+notepad.ipynb
