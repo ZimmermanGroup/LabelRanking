@@ -11,9 +11,9 @@ import joblib
 import argparse
 
 DATASET_INFO = {
-    "name":["iris"], # ,"authorship",  "elevators", "housing", "segment", "stock"
-    "num_features":[4], # ,70,9,6,18,5
-    "num_labels":[3] # ,4,9,6,7,5
+    "name":["authorship","elevators", "housing", "iris", "segment", "stock"], # 
+    "num_features":[70,9,6,4,18,5], # 
+    "num_labels":[4,9,6,3,7,5] # 
 }
 N_ITER = 5
 N_CV = 10
@@ -26,6 +26,7 @@ def parse_args():
     parser.add_argument("--lrrf", default=False, help="Include Label Ranking RF as in Qiu, 2018")
     parser.add_argument("--rpc", default=False, help="Include Pairwise label ranking as in Hüllermeier, 2008")
     parser.add_argument("--ibm", default=False, help="Include Instance-based label ranking with Mallows model as in Hüllermeier, 2009")
+    parser.add_argument("--misslabel", default=0, help="Probability of a label missing in percent.")
     parser.add_argument("--save", default=True, help="Whether to save resulting scores in an excel file.")
     args = parser.parse_args()
     if args.lrrf is False and args.rpc is False and args.ibm is False :
@@ -43,7 +44,7 @@ if __name__ == "__main__" :
     
     if parser.lrrf :
         model_names.append("Label Ranking Random Forest")
-        models.append(LabelRankingRandomForest())
+        models.append(LabelRankingRandomForest(n_estimators=100, max_depth=None))
         score_dict.update(
             {"Label Ranking Random Forest":np.zeros((len(DATASET_INFO["name"]), N_ITER * N_CV))}
         ) 
@@ -65,7 +66,6 @@ if __name__ == "__main__" :
             {"Instance Based Mallows":np.zeros((len(DATASET_INFO["name"]), N_ITER * N_CV))}
         ) 
 
-
     for i, row in datasets_info_df.iterrows() :
         dataset = pd.read_excel(f"datasets/{row['name']}_dense.xls", header=None)
         X = dataset.iloc[:,:row["num_features"]].to_numpy()
@@ -78,11 +78,11 @@ if __name__ == "__main__" :
                 X_train, X_test = X[train_index], X[test_index]
                 y_train, y_test = y[train_index], y[test_index]
                 
-                for i, model in enumerate(models) :
+                for l, model in enumerate(models) :
                     model.fit(X_train, y_train) 
                     y_pred = model.predict(X_test)
-                    score_dict[model_names[i]][i, N_CV*j+k] = kendalltau(len(y_pred)-y_pred, y_test).statistic
-    print(score_dict)
+                    score_dict[model_names[l]][i, N_CV*j+k] = kendalltau(len(y_pred)-y_pred, y_test).statistic
+    
     average_scores = np.zeros((len(model_names), len(DATASET_INFO["name"])))
     for k, v in score_dict.items() :
         average_scores[model_names.index(k), :] = np.mean(v, axis=1).flatten()

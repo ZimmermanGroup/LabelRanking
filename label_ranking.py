@@ -6,7 +6,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.neighbors import NearestNeighbors
 from rank_aggregation import *
 
-
+### We deal with y as rankings, not scores or preferences. The smaller values, the better.
 
 class RPC():
     """ Reproduces the ranking by pairwise comparison method proposed in 
@@ -49,9 +49,9 @@ class RPC():
         self.n_labels = y.shape[1]
         for column_combination in combinations(range(y.shape[1]), 2) :
             sub_y = y[:, list(column_combination)]
-            # np.argmax : Label with higher column index is assigned 1 if it is preferred.
+            # np.argmin : Label with higher column index is assigned 1 if it is preferred (lower ranking value).
             # three conditions : insures that both labels are recorded with different continuous values.
-            sub_preference = np.argmax(
+            sub_preference = np.argmin(
                 sub_y[(~np.isnan(sub_y[:, 0])) & (~np.isnan(sub_y[:, 1])) & (sub_y[:, 0] != sub_y[:, 1])],
                 axis=1
             )
@@ -207,7 +207,6 @@ class IBLR_M():
         pass
 
 
-
     def predict(self, X) : 
         """ Predicts the rankings for test instances.
         
@@ -231,7 +230,7 @@ class IBLR_M():
         pi_hat = borda(neighbor_rankings) # shape n_samples, n_labels
         pi = np.zeros_like(pi_hat)
         count = 0
-        while pi != pi_hat :
+        while np.any(pi != pi_hat) :
             if count > 0 :
                 pi_hat = pi
             # Lines 4~8 : First M step - filling incomplete rankings so that they are the most probable extension
@@ -242,7 +241,7 @@ class IBLR_M():
             # Line 9
             pi = borda(all_sigma_star) # will need to fix this into completed_neighbor_rankings
             count += 1
-        return pi_hat
+        return np.ones_like(pi_hat)*pi_hat.shape[1] - pi_hat
         # theta_hat = np.zeros(neighbor_rankings.shape[0])
         # for i in range(neighbor_rankings.shape[0]):
         #     theta_hat[i] = self._get_theta_hat(neighbor_rankings[i,:,:].T, pi_hat)
@@ -258,10 +257,13 @@ class LabelRankingRandomForest():
     """
     def __init__(
         self,
+        n_estimators=50,
+        max_depth=8,
         cross_validator=None,
     ) :
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
         self.cross_validator = cross_validator
-        
 
     def fit(self, X ,y) :
         """ Builds a random forest classifier by TLAC (top label as class).
@@ -275,17 +277,15 @@ class LabelRankingRandomForest():
             Output array of continuous yield values.
         """
         # Applies TLAC to y array
-        tlac_y = np.argmax(y, axis=1)
-        order = np.argsort(y, axis=1)
-        y_rank = np.ones_like(order)*order.shape[1] - np.argsort(order, axis=1) 
+        tlac_y = np.argmin(y, axis=1) 
 
         if self.cross_validator is not None :
             self.cross_validator.fit(X, tlac_y)
             model = self.cross_validator.best_estimator_
         else :
             model = RandomForestClassifier(
-                n_estimators=50, 
-                max_depth=8, 
+                n_estimators=self.n_estimators, 
+                max_depth=self.max_depth, 
                 criterion="log_loss", 
                 max_features="log2", 
                 n_jobs=-1,
@@ -295,17 +295,17 @@ class LabelRankingRandomForest():
         self.model = model
         self.n_labels = y.shape[1]
 
-        borda_count_by_tree_and_leaf = {}
+        borda_rank_by_tree_and_leaf = {}
         # Gets what training instances arrive at which node
         X_leaves = model.apply(X)
         for i in range(X_leaves.shape[1]) :
-            borda_count_by_tree_and_leaf.update({i:{}})
+            borda_rank_by_tree_and_leaf.update({i:{}})
             for leaf_num in np.unique(X_leaves[:,i]) :
                 inds = np.where(X_leaves[:,i] == leaf_num)[0]
-                borda_count = borda(np.expand_dims(y_rank[inds,:].T, axis=0))
-                borda_count_by_tree_and_leaf[i].update({leaf_num:borda_count})
+                borda_rank = borda_count(np.expand_dims(y[inds,:].T, axis=0))
+                borda_rank_by_tree_and_leaf[i].update({leaf_num:borda_rank})
  
-        self.borda_by_tree_and_leaf = borda_count_by_tree_and_leaf
+        self.borda_by_tree_and_leaf = borda_rank_by_tree_and_leaf
 
         return self
     
@@ -329,5 +329,5 @@ class LabelRankingRandomForest():
             row = X_leaves[i,:]
             for j, leaf_num in enumerate(row) :
                 collected_borda_array[i, :, j] = self.borda_by_tree_and_leaf[j][leaf_num]
-        ranking_array = borda(collected_borda_array)
-        return ranking_array
+        ranking_array = borda_count(collected_borda_array)
+        return np.ones_like(ranking_array)*ranking_array.shape[1] - ranking_array
