@@ -13,8 +13,9 @@ import argparse
 DATASET_INFO = {
     "name":["authorship","elevators", "housing", "iris", "segment", "stock"], # 
     "num_features":[70,9,6,4,18,5], # 
-    "num_labels":[4,9,6,3,7,5] # 
+    "num_labels":[4,9,6,3,7,5] #
 }
+# num instances : 841, 16599, 506, 2310, 950
 N_ITER = 5
 N_CV = 10
 
@@ -26,10 +27,11 @@ def parse_args():
     parser.add_argument("--lrrf", default=False, help="Include Label Ranking RF as in Qiu, 2018")
     parser.add_argument("--rpc", default=False, help="Include Pairwise label ranking as in Hüllermeier, 2008")
     parser.add_argument("--ibm", default=False, help="Include Instance-based label ranking with Mallows model as in Hüllermeier, 2009")
+    parser.add_argument("--ibpl", default=False, help="Include Instance-based label ranking with Plackett=Luce model as in Hüllermeier, 2010")
     parser.add_argument("--misslabel", default=0, help="Probability of a label missing in percent.")
     parser.add_argument("--save", default=True, help="Whether to save resulting scores in an excel file.")
     args = parser.parse_args()
-    if args.lrrf is False and args.rpc is False and args.ibm is False :
+    if args.lrrf is False and args.rpc is False and args.ibm is False and args.ibpl is False :
         parser.error("At least one model is required.")
     return args
 
@@ -64,7 +66,13 @@ if __name__ == "__main__" :
         models.append(IBLR_M(n_neighbors=5, metric="euclidean"))
         score_dict.update(
             {"Instance Based Mallows":np.zeros((len(DATASET_INFO["name"]), N_ITER * N_CV))}
-        ) 
+        )
+    if parser.ibpl :
+        model_names.append("Instance Based Plackett-Luce")
+        models.append(IBLR_PL(n_neighbors=5))
+        score_dict.update(
+            {"Instance Based Plackett-Luce":np.zeros((len(DATASET_INFO["name"]), N_ITER * N_CV))}
+        )
 
     for i, row in datasets_info_df.iterrows() :
         dataset = pd.read_excel(f"datasets/{row['name']}_dense.xls", header=None)
