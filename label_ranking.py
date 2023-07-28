@@ -509,3 +509,61 @@ class LabelRankingRandomForest:
                 ]
         ranking_array = borda_count(collected_borda_array)
         return np.ones_like(ranking_array) * ranking_array.shape[1] - ranking_array
+
+
+class Baseline:
+    """ A baseline method that selects the top-k reaction conditions from the training dataset 
+    by either highest average yield / borda aggregated ranking / modal aggregated ranking.
+
+    Parameters
+    ----------
+    criteria : str {"avg_yield", "borda", "modal"}
+        How to select the reactions.
+            avg_yield : selects the reaction conditions that give highest average yield across substrate pairs in the training data.
+                        If this is selected, we assume that y given for fit is an array of rankings.
+            borda: selects the highest ranked conditions after borda aggregation.
+            modal: selects the condition that has the most frequent number of highest ranks.
+    
+    k : int 
+        Number of reactions to select.
+    """
+
+    def __init__(
+        self,
+        criteria="avg_yield"
+    ):
+        self.criteria = criteria
+
+    def fit(self, X, y):
+        """ Selects the reaction condition to return. 
+        
+        Parameters
+        ----------
+        X : np.ndarray of shape (n_samples, n_features)
+            Unnecessary for baselines, but kept for consistency with other classes.
+        y : np.ndarray of shape (n_samples, n_labels)
+            Can be an array of either raw yield values or rankings.
+        """
+        if self.criteria == "avg_yield" :
+            pred_y_inds = np.argsort(np.mean(y, axis=0))[::-1]
+        elif self.criteria == "borda" :
+            pred_y_inds = np.argsort(borda(np.expand_dims(y.T, axis=0)).flatten())
+        elif self.criteria == "modal" :
+            pred_y_inds = np.argsort(modal(np.expand_dims(y.T, axis=0)).flatten())
+        self.pred_y_inds = pred_y_inds
+        return self
+    
+    def predict(self, X) :
+        """ Returns the baseline predictions for all test reactions. 
+        
+        Parameters
+        ----------
+        X : np.ndarray of shape (n_samples, n_features)
+            Test feature array.
+
+        Returns
+        -------
+        y_pred : np.ndarray of shape (n_samples, self.k)
+            Suggested top reactions.
+        """
+        return np.vstack(tuple([self.pred_y_inds]*X.shape[0]))

@@ -123,6 +123,6 @@ def modal(rank_collection):
         Aggregated ranks.
     """
     modes, _ = mode(
-        rank_collection, axis=2
+        rank_collection, axis=2, keepdims=False
     )  # Note that only one value is returned even with ties
     return modes.reshape(rank_collection.shape[0], rank_collection.shape[1])
