@@ -1,4 +1,5 @@
 literature/*
+performance_excels/*
 .DS_Store
 __pycache__/
 *.xlsx

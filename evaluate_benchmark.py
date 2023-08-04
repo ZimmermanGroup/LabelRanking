@@ -11,9 +11,9 @@ import joblib
 import argparse
 
 DATASET_INFO = {
-    "name": ["authorship", "elevators", "housing", "iris", "segment", "stock"],  #
-    "num_features": [70, 9, 6, 4, 18, 5],  #
-    "num_labels": [4, 9, 6, 3, 7, 5],  #
+    "name": ["authorship"],  #, "elevators", "housing", "iris", "segment", "stock"
+    "num_features": [70],  #, 9, 6, 4, 18, 5
+    "num_labels": [4],  #, 9, 6, 3, 7, 5
 }
 # num instances : 841, 16599, 506, 2310, 950
 N_ITER = 5
@@ -127,7 +127,7 @@ if __name__ == "__main__":
                     model.fit(X_train, y_train)
                     y_pred = model.predict(X_test)
                     score_dict[model_names[l]][i, N_CV * j + k] = kendalltau(
-                        len(y_pred) - y_pred, y_test
+                        y_pred, y_test
                     ).statistic
 
     average_scores = np.zeros((len(model_names), len(DATASET_INFO["name"])))
@@ -137,6 +137,6 @@ if __name__ == "__main__":
         data=average_scores, index=model_names, columns=DATASET_INFO["name"]
     )
     if parser.save:
-        score_df.to_excel("Benchmark_scores.xlsx")
+        score_df.to_excel("performance_excels/Benchmark_scores.xlsx")
 
     print(score_df)

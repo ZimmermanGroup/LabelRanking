@@ -8,9 +8,11 @@ from scipy.stats import kendalltau, spearmanr
 from label_ranking import *
 from rank_aggregation import *
 from sklr.tree import DecisionTreeLabelRanker
+from dataset_utils import *
 from tqdm import tqdm
 from time import time
 import argparse
+import os
 
 
 # N_ITERS = 10
@@ -116,33 +118,6 @@ def prep_full_doyle_df():
     org_data.to_excel("organized_doyle.xlsx")
 
     return org_data
-
-
-def yield_to_ranking(yield_array):
-    """Transforms an array of yield values to their rankings.
-    Currently, treat 0% yields as ties in the last place. (total # of labels)
-
-    Parameters
-    ----------
-    yield_array : np.ndarray of shape (n_samples, n_conditions)
-        Array of raw yield values.
-
-    Returns
-    -------
-    ranking_array : np.ndarray of shape (n_samples, n_conditions)
-        Array of ranking values. Lower values correspond to higher yields.
-    """
-    if len(yield_array.shape) == 2:
-        raw_rank = yield_array.shape[1] - np.argsort(
-            np.argsort(yield_array, axis=1), axis=1
-        )
-        for i, row in enumerate(yield_array):
-            raw_rank[i, np.where(row == 0)[0]] = len(row > 0)
-        print("Raw rank", raw_rank.shape)
-    elif len(yield_array.shape) == 1:
-        raw_rank = len(yield_array) - np.argsort(np.argsort(yield_array))
-        raw_rank[np.where(raw_rank == 0)[0]] = len(raw_rank)
-    return raw_rank
 
 
 def split_dataset(
@@ -415,11 +390,14 @@ def evaluate_and_update_score_dict(
             if not y_is_ranking:
                 pred_y = yield_to_ranking(pred_y).flatten()
                 ranking_y = yield_to_ranking(test_y)  # actual ranking
-                top_rank_retrieved = np.min(ranking_y[np.argsort(pred_y)[:top_k]])
             else:
+                pred_y = pred_y.flatten()
                 ranking_y = test_y
-                ranks_retrieved = np.argsort(pred_y, axis=1)[:, :top_k] + 1
-                top_rank_retrieved = np.min(ranks_retrieved)
+            print()
+            print(pred_y)
+            print(ranking_y)
+            top_rank_retrieved = np.min(ranking_y[np.argpartition(pred_y, kth=top_k)[:top_k]])
+            print(ranking_y[np.argpartition(pred_y, kth=top_k)[:top_k]])
             kendall = kendalltau(ranking_y, pred_y).statistic
             # Top rank retrieved when top-k suggested reactions are conducted.
 
@@ -437,7 +415,13 @@ def evaluate_and_update_score_dict(
 if __name__ == "__main__":
     parser = parse_args()
     print(parser)
-    org_doyle_df = prep_full_doyle_df()
+    if not os.path.exists("organized_doyle.xlsx") :
+        print("Organized data file does not exist. Preparing...")
+        org_doyle_df = prep_full_doyle_df()
+    else :
+        print("Loading previously organized dataset.")
+        org_doyle_df = pd.read_excel("organized_doyle.xlsx")
+    print()
     # Below line unpivots the table, for use in normal classification / regression
     cleaned_raw_data = org_doyle_df.reset_index().melt(
         id_vars=["aryl_halide", "additive"]
@@ -464,7 +448,7 @@ if __name__ == "__main__":
     if parser.baseline :
         baseline_performance_dict = deepcopy(performance_dict)
 
-    for n_reactants_as_test in range(13, 14):  # need to change 3 to 6 or larger
+    for n_reactants_as_test in range(13, 14):  
         for iter in tqdm(range(parser.n_iter)):
             # Split arrays for Label Ranking algorithms
             test_halide_names, test_additive_names, df_list = split_dataset(
@@ -591,7 +575,7 @@ if __name__ == "__main__":
                 )
                 if parser.save :
                     regressor_performance_df = pd.DataFrame(regressor_performance_dict)
-                    regressor_performance_df.to_excel(f"regressor_performance_{parser.n}.xlsx")
+                    regressor_performance_df.to_excel(f"performance_excels/regressor_performance_{parser.n}.xlsx")
                     
                 print("Moving onto label ranking algorithms.")
                 print()
@@ -699,7 +683,7 @@ if __name__ == "__main__":
                         )
                     if parser.save :
                         rpc_performance_df = pd.DataFrame(rpc_performance_dict)
-                        rpc_performance_df.to_excel(f"rpc_performance_{parser.n}.xlsx")
+                        rpc_performance_df.to_excel(f"performance_excels/label_ranking_performance_{parser.n}.xlsx")
 
                 if parser.baseline :
                     print("Evaluating baseline models.")
@@ -709,6 +693,7 @@ if __name__ == "__main__":
                             avg_yield_base = Baseline()
                             avg_yield_base.fit("", training_lr_df.to_numpy())
                             baseline_models.append(avg_yield_base)
+                            print("Top 2 predicted through average yield in training data:", avg_yield_base.predict(np.zeros((1,4)))[0][:2])
                         elif baseline_type == "modal":
                             modal_base = Baseline(criteria="modal")
                             modal_base.fit("", train_y_rank)
@@ -717,6 +702,8 @@ if __name__ == "__main__":
                             borda_base = Baseline(criteria="borda")
                             borda_base.fit("", train_y_rank)
                             baseline_models.append(borda_base)
+                            print("Top 2 predicted through Borda count in training data:", borda_base.predict(np.zeros((1,4)))[0][:2])
+                            print()
                         else :
                             print("This is not a supported baseline type. Please use one of avg_yield, modal, borda.")
                             break
@@ -745,6 +732,6 @@ if __name__ == "__main__":
                         )
                     if parser.save :
                         baseline_performance_df = pd.DataFrame(baseline_performance_dict)
-                        baseline_performance_df.to_excel(f"baseline_performance_{parser.n_iter}.xlsx")
+                        baseline_performance_df.to_excel(f"performance_excels/baseline_performance_{parser.n_iter}.xlsx")
                         
 

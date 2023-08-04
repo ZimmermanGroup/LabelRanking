@@ -74,8 +74,7 @@ def borda_count(rank_collection):
                 - ranks_for_sample,
                 axis=1,
             )
-    order = np.argsort(score_array, axis=1)
-    rank = np.argsort(order, axis=1)
+    rank = np.argsort(-score_array, axis=1) + np.ones_like(score_array)
     return rank
 
 
@@ -103,9 +102,8 @@ def copeland(rank_collection):
             list(map(f, np.sum(slice_ref > slice_compare, axis=1)))
         ).reshape(-1, 1)
     final_score = np.sum(score_array, axis=2)
-    order = np.argsort(final_score, axis=1)
-    rank = np.argsort(order, axis=1) + np.ones_like(order)
-    return len(rank) - rank  # returns lowest value to highest score
+    rank = np.argsort(-final_score, axis=1) + np.ones_like(final_score)
+    return rank  # returns lowest value to highest score
 
 
 def modal(rank_collection):

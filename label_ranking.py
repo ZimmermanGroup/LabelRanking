@@ -111,7 +111,7 @@ class RPC:
                 score_array[:, column_combination[0], column_combination[1]] = proba[
                     :, 0
                 ]
-        order = np.argsort(np.sum(score_array, axis=2), axis=1)
+        order = np.argsort(-np.sum(score_array, axis=2), axis=1)
         rank = np.argsort(order, axis=1) + np.ones_like(order)
         return rank
 
@@ -280,7 +280,8 @@ class IBLR_M:
                 all_sigma_star
             )  # will need to fix this into completed_neighbor_rankings
             count += 1
-        return np.ones_like(pi_hat) * pi_hat.shape[1] - pi_hat
+        return pi_hat
+        # np.ones_like(pi_hat) * pi_hat.shape[1] - pi_hat
         # theta_hat = np.zeros(neighbor_rankings.shape[0])
         # for i in range(neighbor_rankings.shape[0]):
         #     theta_hat[i] = self._get_theta_hat(neighbor_rankings[i,:,:].T, pi_hat)
@@ -508,7 +509,7 @@ class LabelRankingRandomForest:
                     leaf_num
                 ]
         ranking_array = borda_count(collected_borda_array)
-        return np.ones_like(ranking_array) * ranking_array.shape[1] - ranking_array
+        return ranking_array
 
 
 class Baseline:
