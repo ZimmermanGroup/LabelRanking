@@ -21,7 +21,7 @@ def yield_to_ranking(yield_array):
         )
         for i, row in enumerate(yield_array):
             raw_rank[i, np.where(row == 0)[0]] = len(row > 0)
-        print("Raw rank", raw_rank)
+        # print("Raw rank", raw_rank)
     elif len(yield_array.shape) == 1:
         raw_rank = len(yield_array) - np.argsort(np.argsort(yield_array))
         raw_rank[np.where(raw_rank == 0)[0]] = len(raw_rank)

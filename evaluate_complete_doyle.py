@@ -393,11 +393,7 @@ def evaluate_and_update_score_dict(
             else:
                 pred_y = pred_y.flatten()
                 ranking_y = test_y
-            print()
-            print(pred_y)
-            print(ranking_y)
             top_rank_retrieved = np.min(ranking_y[np.argpartition(pred_y, kth=top_k)[:top_k]])
-            print(ranking_y[np.argpartition(pred_y, kth=top_k)[:top_k]])
             kendall = kendalltau(ranking_y, pred_y).statistic
             # Top rank retrieved when top-k suggested reactions are conducted.
 
@@ -415,13 +411,9 @@ def evaluate_and_update_score_dict(
 if __name__ == "__main__":
     parser = parse_args()
     print(parser)
-    if not os.path.exists("organized_doyle.xlsx") :
-        print("Organized data file does not exist. Preparing...")
-        org_doyle_df = prep_full_doyle_df()
-    else :
-        print("Loading previously organized dataset.")
-        org_doyle_df = pd.read_excel("organized_doyle.xlsx")
+    org_doyle_df = prep_full_doyle_df()
     print()
+    
     # Below line unpivots the table, for use in normal classification / regression
     cleaned_raw_data = org_doyle_df.reset_index().melt(
         id_vars=["aryl_halide", "additive"]
@@ -524,10 +516,7 @@ if __name__ == "__main__":
                     list_both_OOS_y_cont[0].shape,
                     len(list_OOS_pairs),
                 )
-                # print()
-                # print("Finished preparing all arrays.")
-                # print()
-
+                
                 # Prepare one-halide-out CV split
                 training_halides = [x for x in halides if x not in test_halide_names]
                 test_fold = [
@@ -575,7 +564,7 @@ if __name__ == "__main__":
                 )
                 if parser.save :
                     regressor_performance_df = pd.DataFrame(regressor_performance_dict)
-                    regressor_performance_df.to_excel(f"performance_excels/regressor_performance_{parser.n}.xlsx")
+                    regressor_performance_df.to_excel(f"performance_excels/regressor_performance_{parser.n_iter}.xlsx")
                     
                 print("Moving onto label ranking algorithms.")
                 print()
@@ -589,13 +578,7 @@ if __name__ == "__main__":
                 train_X = np.vstack(tuple(train_X))
                 scaler = StandardScaler()
                 train_X_std = scaler.fit_transform(train_X)
-                print(
-                    "Training array shapes:",
-                    train_X.shape,
-                    train_y_rank.shape,
-                    len(train_reactants),
-                )
-
+                
                 (
                     list_halide_OOS_X,
                     list_halide_OOS_y_rank,
@@ -605,7 +588,7 @@ if __name__ == "__main__":
                     scaler.transform(x.reshape(1, -1)) for x in list_halide_OOS_X
                 ]
                 std_halide_OOS_X = np.vstack(tuple(list_std_halide_OOS_X))
-
+                
                 (
                     list_additive_OOS_X,
                     list_additive_OOS_y_rank,
@@ -683,7 +666,7 @@ if __name__ == "__main__":
                         )
                     if parser.save :
                         rpc_performance_df = pd.DataFrame(rpc_performance_dict)
-                        rpc_performance_df.to_excel(f"performance_excels/label_ranking_performance_{parser.n}.xlsx")
+                        rpc_performance_df.to_excel(f"performance_excels/label_ranking_performance_{parser.n_iter}.xlsx")
 
                 if parser.baseline :
                     print("Evaluating baseline models.")
@@ -692,8 +675,10 @@ if __name__ == "__main__":
                         if baseline_type == "avg_yield" :
                             avg_yield_base = Baseline()
                             avg_yield_base.fit("", training_lr_df.to_numpy())
+                            print("Average yield by condition:", np.average(training_lr_df.to_numpy(), axis=0))
+                            print("Prediction vector:", avg_yield_base.predict(np.zeros((1,4))))
                             baseline_models.append(avg_yield_base)
-                            print("Top 2 predicted through average yield in training data:", avg_yield_base.predict(np.zeros((1,4)))[0][:2])
+                            print("Top 2 predicted through average yield in training data:", np.argsort(avg_yield_base.predict(np.zeros((1,4)))[0])[:2])
                         elif baseline_type == "modal":
                             modal_base = Baseline(criteria="modal")
                             modal_base.fit("", train_y_rank)
@@ -702,7 +687,7 @@ if __name__ == "__main__":
                             borda_base = Baseline(criteria="borda")
                             borda_base.fit("", train_y_rank)
                             baseline_models.append(borda_base)
-                            print("Top 2 predicted through Borda count in training data:", borda_base.predict(np.zeros((1,4)))[0][:2])
+                            print("Top 2 predicted through Borda count in training data:", np.argsort(borda_base.predict(np.zeros((1,4)))[0])[:2])
                             print()
                         else :
                             print("This is not a supported baseline type. Please use one of avg_yield, modal, borda.")
@@ -733,5 +718,4 @@ if __name__ == "__main__":
                     if parser.save :
                         baseline_performance_df = pd.DataFrame(baseline_performance_dict)
                         baseline_performance_df.to_excel(f"performance_excels/baseline_performance_{parser.n_iter}.xlsx")
-                        
-
+   

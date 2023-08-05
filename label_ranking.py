@@ -546,12 +546,12 @@ class Baseline:
             Can be an array of either raw yield values or rankings.
         """
         if self.criteria == "avg_yield" :
-            pred_y_inds = np.argsort(np.mean(y, axis=0))[::-1]
+            pred_y_ranking = y.shape[1]-np.argsort(np.argsort(np.mean(y, axis=0)))
         elif self.criteria == "borda" :
-            pred_y_inds = np.argsort(borda(np.expand_dims(y.T, axis=0)).flatten())
+            pred_y_ranking = borda(np.expand_dims(y.T, axis=0))
         elif self.criteria == "modal" :
-            pred_y_inds = np.argsort(modal(np.expand_dims(y.T, axis=0)).flatten())
-        self.pred_y_inds = pred_y_inds
+            pred_y_ranking = modal(np.expand_dims(y.T, axis=0))
+        self.pred_y_ranking = pred_y_ranking
         return self
     
     def predict(self, X) :
@@ -567,4 +567,4 @@ class Baseline:
         y_pred : np.ndarray of shape (n_samples, self.k)
             Suggested top reactions.
         """
-        return np.vstack(tuple([self.pred_y_inds]*X.shape[0]))
+        return np.vstack(tuple([self.pred_y_ranking]*X.shape[0]))
