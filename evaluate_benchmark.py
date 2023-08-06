@@ -6,6 +6,7 @@ from sklearn.preprocessing import StandardScaler
 from scipy.stats import kendalltau, spearmanr
 from label_ranking import *
 from rank_aggregation import *
+from sklr.tree import DecisionTreeLabelRanker
 from tqdm import tqdm
 import joblib
 import argparse
@@ -44,11 +45,16 @@ def parse_args():
         help="Include Instance-based label ranking with Plackett=Luce model as in Hüllermeier, 2010",
     )
     parser.add_argument(
+        "--boost",
+        default=False,
+        help="Include Boosting with LRT as in Shmueli, 2019." 
+    )
+    parser.add_argument(
         "--misslabel", default=0, help="Probability of a label missing in percent."
     )
     parser.add_argument(
         "--save",
-        default=True,
+        action="store_true", 
         help="Whether to save resulting scores in an excel file.",
     )
     args = parser.parse_args()
@@ -57,6 +63,7 @@ def parse_args():
         and args.rpc is False
         and args.ibm is False
         and args.ibpl is False
+        and args.boost is False
     ):
         parser.error("At least one model is required.")
     return args
@@ -106,6 +113,22 @@ if __name__ == "__main__":
         score_dict.update(
             {
                 "Instance Based Plackett-Luce": np.zeros(
+                    (len(DATASET_INFO["name"]), N_ITER * N_CV)
+                )
+            }
+        )
+    if parser.boost :
+        model_names.append("Boosting with LRT")
+        models.append(
+            BoostLR(
+                RPC(base_learner=LogisticRegression(C=1), cross_validator=None),
+                max_iter=50,
+                sample_ratio=1
+            )
+        )
+        score_dict.update(
+            {
+                "Boosting with LRT": np.zeros(
                     (len(DATASET_INFO["name"]), N_ITER * N_CV)
                 )
             }

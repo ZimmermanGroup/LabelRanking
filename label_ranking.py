@@ -4,6 +4,9 @@ from itertools import combinations
 from scipy.optimize import line_search
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neighbors import NearestNeighbors
+from sklearn.utils import resample
+from scipy.stats import kendalltau
+from math import log
 from rank_aggregation import *
 
 ### We deal with y as rankings, not scores or preferences. The smaller values, the better.
@@ -568,3 +571,103 @@ class Baseline:
             Suggested top reactions.
         """
         return np.vstack(tuple([self.pred_y_ranking]*X.shape[0]))
+    
+
+class BoostLR:
+    """Reproduces boosting for label ranking method proposed in
+    L. Dery and E. Shmueli, 2019: BoostLR: A Boosting-Based Learning Ensemble for label ranking tasks.
+
+    Parameters
+    ----------
+    max_iter : int
+        Maximum number of boosting iterations.
+    sample_ratio : float
+        Portion of data to sample at each boosting iteration.
+    """
+    def __init__(
+            self, 
+            base_learner,
+            max_iter, 
+            sample_ratio,
+            random_state=42
+        ):
+        self.base_learner = base_learner
+        self.max_iter = max_iter
+        self.sample_ratio = sample_ratio
+        self.random_state = random_state
+
+
+    def fit(self, X, y):
+        """ Implements the boosting process with the base weak learner.
+
+        Parameters
+        ---------
+        X : np.ndarray of shape (n_samples, n_features)
+            Input array of descriptors.
+        y : np.ndarray of shape (n_samples, n_labels)
+            Output array of continuous yield values.
+        """
+        iter = 1
+        weights = np.ones(X.shape[0]) / X.shape[0]
+        avg_loss = 0
+        weak_learner_list = []
+        weak_learner_weights = []
+        np.random.seed(self.random_state)
+        while avg_loss < 0.5 and iter <= self.max_iter :
+            inds = np.random.choice(range(X.shape[0]), size=int(X.shape[0]*self.sample_ratio), replace=False, p=weights)
+            X_sample, y_sample = X[inds, :], y[inds, :]
+            model = deepcopy(self.base_learner)
+            model.fit(X_sample, y_sample)
+            weak_learner_list.append(model) # Line 5 Fitting weak learner
+            X_pred = model.predict(X)
+            l_t = np.array([1 - kendalltau(X_row.flatten(), y_row.flatten())[0] for X_row, y_row in zip(X_pred, y)]) # Line 6 - loss for each training instance
+            L_t = l_t / np.max(l_t) # Line 7 - adjusted loss
+            avg_loss = np.sum(np.multiply(L_t, weights)) # Line 8 - average loss
+            model_confidence = avg_loss / (1-avg_loss)
+            weak_learner_weights.append(log(1/model_confidence)) # Line 10
+            raw_weights = np.multiply(weights, np.power(np.ones_like(weights)*model_confidence, 1-L_t))
+            weights = raw_weights / np.sum(raw_weights)
+            if iter % 5 == 0 :
+                print(f"Iteration {iter}: Avg Loss={avg_loss}")
+            iter += 1
+        self.estimators_ = weak_learner_list
+        self.estimator_weights_ = np.array(weak_learner_weights)
+        self.n_labels_ = y.shape[1]
+        return self
+    
+
+    def predict(self, X) :
+        """Builds a ranking for the case where labels are fully labeled, through weighted Borda aggregation.
+
+        Parameters
+        ----------
+        X : np.ndarray of shape (n_samples, n_features)
+            Input array.
+
+        Returns
+        -------
+        ranking_array : np.ndarray of shape (n_samples, n_labels)
+        """
+        full_score_array = np.zeros((X.shape[0], self.n_labels_, len(self.estimators_)))
+
+        for k, (model, weight) in enumerate(zip(self.estimators_, self.estimator_weights_)): # For each model
+            pred_rank = model.predict(X) # (n_samples, n_labels)
+            # print(pred_rank[0,:])
+            score_array = np.zeros(
+                (pred_rank.shape[0], pred_rank.shape[1], pred_rank.shape[1])
+            )
+            for (i, j) in combinations(range(pred_rank.shape[1]), 2):
+                slice_ref = pred_rank[:, i]
+                slice_compare = pred_rank[:, j]
+                score_array[:, i, j] = np.sum(slice_ref < slice_compare)
+                score_array[:, j, i] = np.sum(slice_ref > slice_compare)
+            full_score_array[:,:,k] = np.sum(score_array, axis=2)*weight
+
+        final_score = np.sum(full_score_array, axis=2)
+        order = np.argsort(final_score, axis=1)
+        rank = np.argsort(order, axis=1)
+        return (
+            np.ones_like(rank) * rank.shape[1] - rank
+        )
+
+
