@@ -12,11 +12,11 @@ import joblib
 import argparse
 
 DATASET_INFO = {
-    "name": ["authorship"],  #, "elevators", "housing", "iris", "segment", "stock"
-    "num_features": [70],  #, 9, 6, 4, 18, 5
-    "num_labels": [4],  #, 9, 6, 3, 7, 5
+    "name": ["housing", "iris", "stock"],  #"authorship", "elevators", "segment", 
+    "num_features": [6, 4,  5],  #70, 9, 18,
+    "num_labels": [6, 3,  5],  #4, 9, 7,
 }
-# num instances : 841, 16599, 506, 2310, 950
+# num instances : 841, 16599, 506, 150, 2310, 950
 N_ITER = 5
 N_CV = 10
 
@@ -46,7 +46,7 @@ def parse_args():
     )
     parser.add_argument(
         "--boost",
-        default=False,
+        action="append",
         help="Include Boosting with LRT as in Shmueli, 2019." 
     )
     parser.add_argument(
@@ -118,21 +118,34 @@ if __name__ == "__main__":
             }
         )
     if parser.boost :
-        model_names.append("Boosting with LRT")
-        models.append(
-            BoostLR(
-                RPC(base_learner=LogisticRegression(C=1), cross_validator=None),
-                max_iter=50,
-                sample_ratio=1
+        if "lrt" in parser.boost : 
+            model_names.append("Boosting with LRT")
+            models.append(
+                BoostLR(DecisionTreeLabelRanker(random_state=42, min_samples_split=8))
             )
-        )
-        score_dict.update(
-            {
-                "Boosting with LRT": np.zeros(
-                    (len(DATASET_INFO["name"]), N_ITER * N_CV)
+            score_dict.update(
+                {
+                    "Boosting with LRT": np.zeros(
+                        (len(DATASET_INFO["name"]), N_ITER * N_CV)
+                    )
+                }
+            )
+        if "rpc" in parser.boost :  
+            model_names.append("Boosting with RPC")
+            models.append(
+                BoostLR(
+                    RPC(base_learner=LogisticRegression(C=1), cross_validator=None),
+                    max_iter=50,
+                    sample_ratio=1
                 )
-            }
-        )
+            )
+            score_dict.update(
+                {
+                    "Boosting with RPC": np.zeros(
+                        (len(DATASET_INFO["name"]), N_ITER * N_CV)
+                    )
+                }
+            )
 
     for i, row in datasets_info_df.iterrows():
         dataset = pd.read_excel(f"datasets/{row['name']}_dense.xls", header=None)
