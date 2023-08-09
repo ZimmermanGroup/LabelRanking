@@ -516,7 +516,7 @@ class LabelRankingRandomForest:
 
 
 class Baseline:
-    """ A baseline method that selects the top-k reaction conditions from the training dataset 
+    """A baseline method that selects the top-k reaction conditions from the training dataset
     by either highest average yield / borda aggregated ranking / modal aggregated ranking.
 
     Parameters
@@ -527,20 +527,17 @@ class Baseline:
                         If this is selected, we assume that y given for fit is an array of rankings.
             borda: selects the highest ranked conditions after borda aggregation.
             modal: selects the condition that has the most frequent number of highest ranks.
-    
-    k : int 
+
+    k : int
         Number of reactions to select.
     """
 
-    def __init__(
-        self,
-        criteria="avg_yield"
-    ):
+    def __init__(self, criteria="avg_yield"):
         self.criteria = criteria
 
     def fit(self, X, y):
-        """ Selects the reaction condition to return. 
-        
+        """Selects the reaction condition to return.
+
         Parameters
         ----------
         X : np.ndarray of shape (n_samples, n_features)
@@ -548,18 +545,18 @@ class Baseline:
         y : np.ndarray of shape (n_samples, n_labels)
             Can be an array of either raw yield values or rankings.
         """
-        if self.criteria == "avg_yield" :
-            pred_y_ranking = y.shape[1]-np.argsort(np.argsort(np.mean(y, axis=0)))
-        elif self.criteria == "borda" :
+        if self.criteria == "avg_yield":
+            pred_y_ranking = y.shape[1] - np.argsort(np.argsort(np.mean(y, axis=0)))
+        elif self.criteria == "borda":
             pred_y_ranking = borda(np.expand_dims(y.T, axis=0))
-        elif self.criteria == "modal" :
+        elif self.criteria == "modal":
             pred_y_ranking = modal(np.expand_dims(y.T, axis=0))
         self.pred_y_ranking = pred_y_ranking
         return self
-    
-    def predict(self, X) :
-        """ Returns the baseline predictions for all test reactions. 
-        
+
+    def predict(self, X):
+        """Returns the baseline predictions for all test reactions.
+
         Parameters
         ----------
         X : np.ndarray of shape (n_samples, n_features)
@@ -570,8 +567,8 @@ class Baseline:
         y_pred : np.ndarray of shape (n_samples, self.k)
             Suggested top reactions.
         """
-        return np.vstack(tuple([self.pred_y_ranking]*X.shape[0]))
-    
+        return np.vstack(tuple([self.pred_y_ranking] * X.shape[0]))
+
 
 class BoostLR:
     """Reproduces boosting for label ranking method proposed in
@@ -584,21 +581,15 @@ class BoostLR:
     sample_ratio : float
         Portion of data to sample at each boosting iteration.
     """
-    def __init__(
-            self, 
-            base_learner,
-            max_iter=50, 
-            sample_ratio=0.75,
-            random_state=42
-        ):
+
+    def __init__(self, base_learner, max_iter=50, sample_ratio=0.75, random_state=42):
         self.base_learner = base_learner
         self.max_iter = max_iter
         self.sample_ratio = sample_ratio
         self.random_state = random_state
 
-
     def fit(self, X, y):
-        """ Implements the boosting process with the base weak learner.
+        """Implements the boosting process with the base weak learner.
 
         Parameters
         ---------
@@ -613,11 +604,16 @@ class BoostLR:
         weak_learner_list = []
         weak_learner_weights = []
         np.random.seed(self.random_state)
-        while avg_loss < 0.5 and iter <= self.max_iter : #
-            if self.sample_ratio < 1 :
-                inds = np.random.choice(range(X.shape[0]), size=int(X.shape[0]*self.sample_ratio), replace=False, p=weights)
+        while avg_loss < 0.5 and iter <= self.max_iter:  #
+            if self.sample_ratio < 1:
+                inds = np.random.choice(
+                    range(X.shape[0]),
+                    size=int(X.shape[0] * self.sample_ratio),
+                    replace=False,
+                    p=weights,
+                )
                 X_sample, y_sample = X[inds, :], y[inds, :]
-            else : 
+            else:
                 X_sample, y_sample = X, y
             model = deepcopy(self.base_learner)
             model.fit(X_sample, y_sample)
@@ -625,14 +621,21 @@ class BoostLR:
             # print(y_sample)
             # print()
             # print()
-            weak_learner_list.append(model) # Line 5 Fitting weak learner
+            weak_learner_list.append(model)  # Line 5 Fitting weak learner
             X_pred = model.predict(X)
-            l_t = np.array([1 - kendalltau(X_row.flatten(), y_row.flatten())[0] for X_row, y_row in zip(X_pred, y)]) # Line 6 - loss for each training instance
-            L_t = l_t / np.max(l_t) # Line 7 - adjusted loss
-            avg_loss = np.sum(np.multiply(L_t, weights)) # Line 8 - average loss
-            model_confidence = avg_loss / (1-avg_loss)
-            weak_learner_weights.append(log(1/model_confidence)) # Line 10
-            raw_weights = np.multiply(weights, np.power(np.ones_like(weights)*model_confidence, 1-L_t))
+            l_t = np.array(
+                [
+                    1 - kendalltau(X_row.flatten(), y_row.flatten())[0]
+                    for X_row, y_row in zip(X_pred, y)
+                ]
+            )  # Line 6 - loss for each training instance
+            L_t = l_t / np.max(l_t)  # Line 7 - adjusted loss
+            avg_loss = np.sum(np.multiply(L_t, weights))  # Line 8 - average loss
+            model_confidence = avg_loss / (1 - avg_loss)
+            weak_learner_weights.append(log(1 / model_confidence))  # Line 10
+            raw_weights = np.multiply(
+                weights, np.power(np.ones_like(weights) * model_confidence, 1 - L_t)
+            )
             weights = raw_weights / np.sum(raw_weights)
             # if iter % 5 == 0 :
             #     print(f"Iteration {iter}: Avg Loss={avg_loss}")
@@ -641,9 +644,8 @@ class BoostLR:
         self.estimator_weights_ = np.array(weak_learner_weights)
         self.n_labels_ = y.shape[1]
         return self
-    
 
-    def predict(self, X) :
+    def predict(self, X):
         """Builds a ranking for the case where labels are fully labeled, through weighted Borda aggregation.
 
         Parameters
@@ -656,18 +658,34 @@ class BoostLR:
         ranking_array : np.ndarray of shape (n_samples, n_labels)
         """
         rank_collection = np.zeros((X.shape[0], self.n_labels_, len(self.estimators_)))
-        for k, model in enumerate(self.estimators_): # For each model
-            pred_rank = model.predict(X) # (n_samples, n_labels)
-            rank_collection[:,:,k] = pred_rank
+        for k, model in enumerate(self.estimators_):  # For each model
+            pred_rank = model.predict(X)  # (n_samples, n_labels)
+            rank_collection[:, :, k] = pred_rank
 
         score_array = np.zeros(
-            (rank_collection.shape[0], rank_collection.shape[1], rank_collection.shape[1])
+            (
+                rank_collection.shape[0],
+                rank_collection.shape[1],
+                rank_collection.shape[1],
+            )
         )
         for (i, j) in combinations(range(rank_collection.shape[1]), 2):
             slice_ref = rank_collection[:, i, :]
             slice_compare = rank_collection[:, j, :]
-            score_array[:, i, j] = np.sum(np.multiply(slice_ref < slice_compare, np.tile(self.estimator_weights_, (X.shape[0], 1))), axis=1)
-            score_array[:, j, i] = np.sum(np.multiply(slice_ref > slice_compare, np.tile(self.estimator_weights_, (X.shape[0], 1))), axis=1)
+            score_array[:, i, j] = np.sum(
+                np.multiply(
+                    slice_ref < slice_compare,
+                    np.tile(self.estimator_weights_, (X.shape[0], 1)),
+                ),
+                axis=1,
+            )
+            score_array[:, j, i] = np.sum(
+                np.multiply(
+                    slice_ref > slice_compare,
+                    np.tile(self.estimator_weights_, (X.shape[0], 1)),
+                ),
+                axis=1,
+            )
 
         final_score = np.sum(score_array, axis=2)
         order = np.argsort(final_score, axis=1)
@@ -675,8 +693,4 @@ class BoostLR:
         # print(final_score)
         # print(rank)
         # print()
-        return (
-            np.ones_like(rank) * rank.shape[1] - rank
-        )
-
-
+        return np.ones_like(rank) * rank.shape[1] - rank

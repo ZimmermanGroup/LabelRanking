@@ -12,9 +12,9 @@ import joblib
 import argparse
 
 DATASET_INFO = {
-    "name": ["housing", "iris", "stock"],  #"authorship", "elevators", "segment", 
-    "num_features": [6, 4,  5],  #70, 9, 18,
-    "num_labels": [6, 3,  5],  #4, 9, 7,
+    "name": ["housing", "iris", "stock"],  # "authorship", "elevators", "segment",
+    "num_features": [6, 4, 5],  # 70, 9, 18,
+    "num_labels": [6, 3, 5],  # 4, 9, 7,
 }
 # num instances : 841, 16599, 506, 150, 2310, 950
 N_ITER = 5
@@ -47,14 +47,14 @@ def parse_args():
     parser.add_argument(
         "--boost",
         action="append",
-        help="Include Boosting with LRT as in Shmueli, 2019." 
+        help="Include Boosting with LRT as in Shmueli, 2019.",
     )
     parser.add_argument(
         "--misslabel", default=0, help="Probability of a label missing in percent."
     )
     parser.add_argument(
         "--save",
-        action="store_true", 
+        action="store_true",
         help="Whether to save resulting scores in an excel file.",
     )
     args = parser.parse_args()
@@ -117,8 +117,8 @@ if __name__ == "__main__":
                 )
             }
         )
-    if parser.boost :
-        if "lrt" in parser.boost : 
+    if parser.boost:
+        if "lrt" in parser.boost:
             model_names.append("Boosting with LRT")
             models.append(
                 BoostLR(DecisionTreeLabelRanker(random_state=42, min_samples_split=8))
@@ -130,13 +130,13 @@ if __name__ == "__main__":
                     )
                 }
             )
-        if "rpc" in parser.boost :  
+        if "rpc" in parser.boost:
             model_names.append("Boosting with RPC")
             models.append(
                 BoostLR(
                     RPC(base_learner=LogisticRegression(C=1), cross_validator=None),
                     max_iter=50,
-                    sample_ratio=1
+                    sample_ratio=1,
                 )
             )
             score_dict.update(
