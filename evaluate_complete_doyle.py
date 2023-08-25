@@ -25,6 +25,47 @@ ADDITIVE_DESC = pd.read_csv("datasets/doyle_data/additive_DFT.csv")
 ### Consider as conditions
 LIGAND_DESC = pd.read_csv("datasets/doyle_data/ligand_DFT.csv")
 BASE_DESC = pd.read_csv("datasets/doyle_data/base_DFT.csv")
+FEATURE_DF_LIST = [ARYL_HALIDE_DESC, ADDITIVE_DESC, BASE_DESC, LIGAND_DESC]
+### Preparing adversarial control inputs
+np.random.seed(42)
+def prep_random_desc(desc_df):
+    """ Prepares random features to use as adversarial controls and also be compatible to previously written functions. 
+    
+    Parameters
+    ----------
+    desc_df : pd.DataFrame
+        Original dft calculated values.
+    
+    Returns
+    -------
+    random_df : pd.DataFrame
+        Dataframe with random feature values.
+    """
+    desc_np = desc_df.to_numpy()
+    desc_np[:,:-1] = np.random.normal(size=(desc_np.shape[0], desc_np.shape[1]-1))
+    random_df = pd.DataFrame(desc_np)
+    random_df.columns = desc_df.columns
+    return random_df
+
+
+def prep_onehot_desc(desc_df) :
+    """ Prepares onehot vectors of each component to use as adversarial controls and also be compatible to previously written functions. 
+    
+    Parameters
+    ----------
+    desc_df : pd.DataFrame
+        Original dft calculated values.
+    
+    Returns
+    -------
+    onehot_df : pd.DataFrame
+        Dataframe with onehot vectors.
+    """
+    n_comps = desc_df.shape[0]
+    onehot_array = np.identity(n_comps)
+    onehot_df = pd.DataFrame(onehot_array)
+    onehot_df["name"] = desc_df.iloc[:,-1]
+    return onehot_df
 
 
 def parse_args():
@@ -33,6 +74,11 @@ def parse_args():
         "--test_component",
         action="append",
         help="Which reaction components to consider as 'labels'. Should be either ligand or base.",
+    )
+    parser.add_argument(
+        "--adversarial",
+        action="append",
+        help="Whether to perform adversarial controls. Should either be onehot or random.",
     )
     parser.add_argument(
         "--rfr", action="store_true", help="Include Random Forest Regressor."
@@ -226,7 +272,7 @@ def split_dataset(
     )
 
 
-def name_ranking_df_to_features(name_df):
+def name_ranking_df_to_features(name_df, feature_df_list=FEATURE_DF_LIST):
     """Converts a ranking dataframe with compound names into corresponding numpy array of descriptor values.
     Do not use for normal problem settings.
 
@@ -234,6 +280,8 @@ def name_ranking_df_to_features(name_df):
     ----------
     name_df :  pd.DataFrame
         Dataframe with reactant names in row, reaction condition components in each column.
+    feature_df_list : list of four pd.DataFrame s
+        Feature dataframes to use as inputs IN THE ORDER OF ARYL_HALIDE, ADDITIVE, BASE, LIGAND.
 
     Returns
     -------
@@ -248,18 +296,18 @@ def name_ranking_df_to_features(name_df):
     for i, row in name_df.iterrows():
         list_of_desc_arrays = []
         list_of_desc_arrays.append(
-            ARYL_HALIDE_DESC[ARYL_HALIDE_DESC["name"] == row.name[0]].values[0][:-1]
+        feature_df_list[0][feature_df_list[0]["name"] == row.name[0]].values[0][:-1]
         )
         list_of_desc_arrays.append(
-            ADDITIVE_DESC[ADDITIVE_DESC["name"] == row.name[1]].values[0][:-1]
+            feature_df_list[1][feature_df_list[1]["name"] == row.name[1]].values[0][:-1]
         )
         if "base" in name_df.index.names:
             list_of_desc_arrays.append(
-                BASE_DESC[BASE_DESC["name"] == row.name[2]].values[0][:-1]
+                feature_df_list[2][feature_df_list[2]["name"] == row.name[2]].values[0][:-1]
             )
         if "ligand" in name_df.index.names:
             list_of_desc_arrays.append(
-                LIGAND_DESC[LIGAND_DESC["name"] == row.name[2]].values[0][
+                feature_df_list[3][feature_df_list[3]["name"] == row.name[2]].values[0][
                     :-1
                 ]  # also name[2] because only one of base or ligand can be in index.
             )
@@ -438,6 +486,8 @@ def evaluate_and_update_score_dict(
         for test_X, test_y, oos in zip(list_test_X, list_test_y, list_oos):
             # print(test_X.shape, test_y.shape)
             pred_y = model.predict(test_X)
+            # print("Predicted rankings\n", pred_y)
+            # print("Actual rankings\n", test_y)
             if not y_is_ranking:
                 pred_y = yield_to_ranking(pred_y).flatten()
                 ranking_y = yield_to_ranking(test_y)  # actual ranking
@@ -448,6 +498,8 @@ def evaluate_and_update_score_dict(
                 ranking_y[np.argpartition(pred_y, kth=top_k)[:top_k]]
             )
             kendall = kendalltau(ranking_y, pred_y).statistic
+            # print("Kendall:",kendalltau(ranking_y, pred_y).statistic)
+            # print()
             # Top rank retrieved when top-k suggested reactions are conducted.
 
             score_dict["Number of test reactants"].append(num_test_reactants)
@@ -466,6 +518,10 @@ if __name__ == "__main__":
     print(parser)
     print()
 
+    if parser.adversarial is None :
+        feature_list = []
+    else :
+        feature_list = parser.adversarial
     org_doyle_df = prep_full_doyle_df(parser.test_component)
     print()
 
@@ -497,11 +553,15 @@ if __name__ == "__main__":
     if parser.rfr:
         regressor_performance_dict = deepcopy(performance_dict)
     if parser.lrrf or parser.rpc or parser.ibm or parser.ibpl or parser.lrt:
-        rpc_performance_dict = deepcopy(performance_dict)
+        performance_dict_list = [deepcopy(performance_dict)]
+        # rpc_performance_dict_dft = deepcopy(performance_dict)
+        if parser.adversarial is not None :
+            for i in range(len(parser.adversarial)) :
+                performance_dict_list.append(deepcopy(performance_dict))
     if parser.baseline:
         baseline_performance_dict = deepcopy(performance_dict)
 
-    for n_reactants_as_test in range(13, 14):
+    for n_reactants_as_test in [7]:
         for iter in tqdm(range(parser.n_iter)):
             # Split arrays for Label Ranking algorithms
             test_halide_names, test_additive_names, df_list = split_dataset(
@@ -520,9 +580,9 @@ if __name__ == "__main__":
             train_additive_names = tuple(
                 sorted([x for x in additives if x not in test_additive_names])
             )
-            print("Training halides:", train_halide_names)
-            print("Training additives:", train_additive_names)
-            print()
+            # print("Training halides:", train_halide_names)
+            # print("Training additives:", train_additive_names)
+            # print()
 
             if parser.rfr:
                 # Prepare descriptor arrays
@@ -532,54 +592,54 @@ if __name__ == "__main__":
                 )
                 train_X = np.vstack(tuple(train_X))
                 train_y_cont = np.concatenate(tuple(train_y_cont))
-                print(
-                    "Training array shapes:",
-                    train_X.shape,
-                    train_y_cont.shape,
-                    len(train_reactants),
-                )
+                # print(
+                #     "Training array shapes:",
+                #     train_X.shape,
+                #     train_y_cont.shape,
+                #     len(train_reactants),
+                # )
 
                 (
                     list_halide_OOS_X,
                     list_halide_OOS_y_cont,
                     list_OOS_halide_pairs,
                 ) = name_df_to_features(df_list[0][1], "base")
-                print(
-                    "OOS Halide array shapes:",
-                    len(list_halide_OOS_X),
-                    list_halide_OOS_X[0].shape,
-                    len(list_halide_OOS_y_cont),
-                    list_halide_OOS_y_cont[0].shape,
-                    len(list_OOS_halide_pairs),
-                )
+                # print(
+                #     "OOS Halide array shapes:",
+                #     len(list_halide_OOS_X),
+                #     list_halide_OOS_X[0].shape,
+                #     len(list_halide_OOS_y_cont),
+                #     list_halide_OOS_y_cont[0].shape,
+                #     len(list_OOS_halide_pairs),
+                # )
 
                 (
                     list_additive_OOS_X,
                     list_additive_OOS_y_cont,
                     list_OOS_additive_pairs,
                 ) = name_df_to_features(df_list[0][2], "base")
-                print(
-                    "OOS Additive array shapes:",
-                    len(list_additive_OOS_X),
-                    list_additive_OOS_X[0].shape,
-                    len(list_additive_OOS_y_cont),
-                    list_additive_OOS_y_cont[0].shape,
-                    len(list_OOS_additive_pairs),
-                )
+                # print(
+                #     "OOS Additive array shapes:",
+                #     len(list_additive_OOS_X),
+                #     list_additive_OOS_X[0].shape,
+                #     len(list_additive_OOS_y_cont),
+                #     list_additive_OOS_y_cont[0].shape,
+                #     len(list_OOS_additive_pairs),
+                # )
 
                 (
                     list_both_OOS_X,
                     list_both_OOS_y_cont,
                     list_OOS_pairs,
                 ) = name_df_to_features(df_list[0][3], "base")
-                print(
-                    "Both OOS array shapes:",
-                    len(list_both_OOS_X),
-                    list_both_OOS_X[0].shape,
-                    len(list_both_OOS_y_cont),
-                    list_both_OOS_y_cont[0].shape,
-                    len(list_OOS_pairs),
-                )
+                # print(
+                #     "Both OOS array shapes:",
+                #     len(list_both_OOS_X),
+                #     list_both_OOS_X[0].shape,
+                #     len(list_both_OOS_y_cont),
+                #     list_both_OOS_y_cont[0].shape,
+                #     len(list_OOS_pairs),
+                # )
 
                 # Prepare one-halide-out CV split
                 training_halides = [x for x in halides if x not in test_halide_names]
@@ -623,17 +683,17 @@ if __name__ == "__main__":
                     top_k=1,
                 )
                 end = time()
-                print(
-                    f"Finished training and evaluating RFR. Took {round(end-start, 2)} sec."
-                )
+                # print(
+                #     f"Finished training and evaluating RFR. Took {round(end-start, 2)} sec."
+                # )
                 if parser.save:
                     regressor_performance_df = pd.DataFrame(regressor_performance_dict)
                     regressor_performance_df.to_excel(
-                        f"performance_excels/regressor_performance_{parser.n_iter}.xlsx"
+                        f"performance_excels/regressor_performance_{parser.n_iter}_{n_reactants_as_test}tests.xlsx"
                     )
 
-                print("Moving onto label ranking algorithms.")
-                print()
+                # print("Moving onto label ranking algorithms.")
+                # print()
 
             if (
                 parser.lrrf
@@ -643,111 +703,120 @@ if __name__ == "__main__":
                 or parser.lrt
                 or parser.baseline
             ):
-                # # Preparing arrays for label ranking models.
-                training_lr_df = df_list[1][0]
-                train_X, train_y_rank, train_reactants = name_ranking_df_to_features(
-                    training_lr_df
-                )
-                train_X = np.vstack(tuple(train_X))
-                scaler = StandardScaler()
-                train_X_std = scaler.fit_transform(train_X)
+                lr_save = True
+                for a, feature in enumerate(["dft"] + feature_list):
+                    if feature == "dft" :
+                        list_of_feature_dfs = FEATURE_DF_LIST
+                    elif feature == "onehot":
+                        list_of_feature_dfs = [prep_onehot_desc(x) for x in FEATURE_DF_LIST]
+                    elif feature == "random" :
+                        list_of_feature_dfs = [prep_random_desc(x) for x in FEATURE_DF_LIST]
 
-                (
-                    list_halide_OOS_X,
-                    list_halide_OOS_y_rank,
-                    list_OOS_halide_pairs,
-                ) = name_ranking_df_to_features(df_list[1][1])
-                list_std_halide_OOS_X = [
-                    scaler.transform(x.reshape(1, -1)) for x in list_halide_OOS_X
-                ]
-                std_halide_OOS_X = np.vstack(tuple(list_std_halide_OOS_X))
+                    # # Preparing arrays for label ranking models.
+                    training_lr_df = df_list[1][0]
+                    train_X, train_y_rank, train_reactants = name_ranking_df_to_features(
+                        training_lr_df, list_of_feature_dfs
+                    )
+                    train_X = np.vstack(tuple(train_X))
+                    scaler = StandardScaler()
+                    train_X_std = scaler.fit_transform(train_X)
 
-                (
-                    list_additive_OOS_X,
-                    list_additive_OOS_y_rank,
-                    list_OOS_additive_pairs,
-                ) = name_ranking_df_to_features(df_list[1][2])
-                list_std_additive_OOS_X = [
-                    scaler.transform(x.reshape(1, -1)) for x in list_additive_OOS_X
-                ]
-                std_additive_OOS_X = np.vstack(tuple(list_std_additive_OOS_X))
+                    (
+                        list_halide_OOS_X,
+                        list_halide_OOS_y_rank,
+                        list_OOS_halide_pairs,
+                    ) = name_ranking_df_to_features(df_list[1][1], list_of_feature_dfs)
+                    list_std_halide_OOS_X = [
+                        scaler.transform(x.reshape(1, -1)) for x in list_halide_OOS_X
+                    ]
+                    std_halide_OOS_X = np.vstack(tuple(list_std_halide_OOS_X))
 
-                (
-                    list_both_OOS_X,
-                    list_both_OOS_y_rank,
-                    list_OOS_pairs,
-                ) = name_ranking_df_to_features(df_list[1][3])
-                list_std_both_OOS_X = [
-                    scaler.transform(x.reshape(1, -1)) for x in list_both_OOS_X
-                ]
-                std_both_OOS_X = np.vstack(tuple(list_std_both_OOS_X))
+                    (
+                        list_additive_OOS_X,
+                        list_additive_OOS_y_rank,
+                        list_OOS_additive_pairs,
+                    ) = name_ranking_df_to_features(df_list[1][2], list_of_feature_dfs)
+                    list_std_additive_OOS_X = [
+                        scaler.transform(x.reshape(1, -1)) for x in list_additive_OOS_X
+                    ]
+                    std_additive_OOS_X = np.vstack(tuple(list_std_additive_OOS_X))
 
-                if parser.lrrf or parser.rpc or parser.ibm or parser.ibpl or parser.lrt:
-                    print()
-                    print("Finished preparing all arrays.")
-                    label_ranking_models = []
-                    label_ranking_names = []
-                    if parser.rpc:
-                        print()
-                        print("Fitting RPC-LR")
-                        rpc_lr = RPC(
-                            base_learner=LogisticRegression(C=1), cross_validator=None
-                        )
-                        rpc_lr.fit(train_X_std, train_y_rank)
-                        label_ranking_models.append(rpc_lr)
-                        label_ranking_names.append("Pairwise")
-                        print("Complete")
-                    if parser.lrrf:
-                        print()
-                        print("Fitting LRRF")
-                        lrrf = LabelRankingRandomForest(n_estimators=200)
-                        lrrf.fit(train_X_std, train_y_rank)
-                        label_ranking_models.append(lrrf)
-                        label_ranking_names.append("LRRF")
-                        print("Complete")
-                    if parser.lrt:
-                        print()
-                        print("Fitting LRT")
-                        lrt = DecisionTreeLabelRanker(
-                            random_state=42, min_samples_split=train_y_rank.shape[1] * 2
-                        )
-                        lrt.fit(train_X_std, train_y_rank)
-                        label_ranking_models.append(lrt)
-                        label_ranking_names.append("LRT")
-                        print("Complete")
-                    print()
-                    for model, name in zip(label_ranking_models, label_ranking_names):
-                        evaluate_and_update_score_dict(
-                            rpc_performance_dict,
-                            model,
-                            [
-                                list_std_halide_OOS_X,
-                                list_std_additive_OOS_X,
-                                list_std_both_OOS_X,
-                            ],
-                            [
-                                list_halide_OOS_y_rank,
-                                list_additive_OOS_y_rank,
-                                list_both_OOS_y_rank,
-                            ],
-                            [
-                                list_OOS_halide_pairs,
-                                list_OOS_additive_pairs,
-                                list_OOS_pairs,
-                            ],
-                            True,
-                            train_halide_names,
-                            train_additive_names,
-                            n_reactants_as_test,
-                            name,
-                            list_which_OOS=["halide", "additive", "both"],
-                            top_k=2,
-                        )
-                    if parser.save:
-                        rpc_performance_df = pd.DataFrame(rpc_performance_dict)
-                        rpc_performance_df.to_excel(
-                            f"performance_excels/label_ranking_performance_{parser.n_iter}.xlsx"
-                        )
+                    (
+                        list_both_OOS_X,
+                        list_both_OOS_y_rank,
+                        list_OOS_pairs,
+                    ) = name_ranking_df_to_features(df_list[1][3], list_of_feature_dfs)
+                    list_std_both_OOS_X = [
+                        scaler.transform(x.reshape(1, -1)) for x in list_both_OOS_X
+                    ]
+                    std_both_OOS_X = np.vstack(tuple(list_std_both_OOS_X))
+
+                    if parser.lrrf or parser.rpc or parser.ibm or parser.ibpl or parser.lrt:
+                        # print()
+                        # print("Finished preparing all arrays.")
+                        label_ranking_models = []
+                        label_ranking_names = []
+                        if parser.rpc:
+                            # print()
+                            # print(f"Fitting RPC-LR with {feature} features.")
+                            rpc_lr = RPC(
+                                base_learner=LogisticRegression(C=1), cross_validator=None
+                            )
+                            rpc_lr.fit(train_X_std, train_y_rank)
+                            label_ranking_models.append(rpc_lr)
+                            label_ranking_names.append("Pairwise")
+                            # print("Complete")
+                        if parser.lrrf:
+                            # print()
+                            # print(f"Fitting LRRF with {feature} features.")
+                            lrrf = LabelRankingRandomForest(n_estimators=200)
+                            lrrf.fit(train_X_std, train_y_rank)
+                            label_ranking_models.append(lrrf)
+                            label_ranking_names.append("LRRF")
+                            # print("Complete")
+                        if parser.lrt:
+                            # print()
+                            # print("Fitting LRT")
+                            lrt = DecisionTreeLabelRanker(
+                                random_state=42, min_samples_split=train_y_rank.shape[1] * 2
+                            )
+                            lrt.fit(train_X_std, train_y_rank)
+                            label_ranking_models.append(lrt)
+                            label_ranking_names.append("LRT")
+                        #     print("Complete")
+                        # print()
+                        for model, name in zip(label_ranking_models, label_ranking_names):
+                            evaluate_and_update_score_dict(
+                                performance_dict_list[a],
+                                model,
+                                [
+                                    list_std_halide_OOS_X,
+                                    list_std_additive_OOS_X,
+                                    list_std_both_OOS_X,
+                                ],
+                                [
+                                    list_halide_OOS_y_rank,
+                                    list_additive_OOS_y_rank,
+                                    list_both_OOS_y_rank,
+                                ],
+                                [
+                                    list_OOS_halide_pairs,
+                                    list_OOS_additive_pairs,
+                                    list_OOS_pairs,
+                                ],
+                                True,
+                                train_halide_names,
+                                train_additive_names,
+                                n_reactants_as_test,
+                                name,
+                                list_which_OOS=["halide", "additive", "both"],
+                                top_k=1,
+                            )
+                # if parser.save:
+                #     rpc_performance_df = pd.DataFrame(dict_to_update)
+                #     rpc_performance_df.to_excel(
+                #         f"performance_excels/label_ranking_performance_{parser.n_iter}_{feature}.xlsx"
+                #     )
 
                 if parser.baseline:
                     print("Evaluating baseline models.")
@@ -821,5 +890,11 @@ if __name__ == "__main__":
                             baseline_performance_dict
                         )
                         baseline_performance_df.to_excel(
-                            f"performance_excels/baseline_performance_{parser.n_iter}.xlsx"
+                            f"performance_excels/baseline_performance_{parser.n_iter}_{n_reactants_as_test}tests.xlsx"
                         )
+    
+    if lr_save and parser.save :
+        for a, feature in enumerate(["dft"] + feature_list):
+            pd.DataFrame(performance_dict_list[a]).to_excel(
+                f"performance_excels/label_ranking_performance_{parser.n_iter}_{feature}_{n_reactants_as_test}tests.xlsx"
+            )
