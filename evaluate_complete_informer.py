@@ -1,15 +1,23 @@
 import numpy as np
 import pandas as pd
 import argparse
+import joblib
 from copy import deepcopy
 from dataset_utils import *
+from label_ranking import *
+from sklr.tree import DecisionTreeLabelRanker
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 from scipy.stats import kendalltau
 
 # This script runs leave-one-substrate out. 
+
+performance_dict = {"kendall_tau":[], "reciprocal_rank":[], "test_compound":[], "model":[]}
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Select the models to evaluate.")
@@ -54,12 +62,12 @@ def parse_args():
         action="store_true",
         help="Include baseline models - avg_yield.",
     )
-    # parser.add_argument(
-    #     "-s",
-    #     "--save",
-    #     action="store_true",
-    #     help="Whether to save resulting scores in an excel file.",
-    # )
+    parser.add_argument(
+        "-s",
+        "--save",
+        action="store_true",
+        help="Whether to save resulting scores in an excel file.",
+    )
     args = parser.parse_args()
     if (
         args.lrrf is False
@@ -91,6 +99,31 @@ def prep_data(feature_type, output_type, test_component):
     """
     pass
 
+
+def update_perf_dict(perf_dict, kt, rr, comp, model):
+    perf_dict["kendall_tau"].append(kt)
+    perf_dict["reciprocal_rank"].append(rr)
+    perf_dict["test_compound"].append(comp)
+    perf_dict["model"].append(model)
+    # return perf_dict
+
+
+def evaluate_lr_alg(test_rank, pred_rank, n_rxns, perf_dict, comp, model) :
+    kt = kendalltau(test_rank, pred_rank).statistic
+    predicted_highest_yield_inds = np.argpartition(pred_rank.flatten(), n_rxns)[:n_rxns]
+    rr = 1/np.min(test_rank[predicted_highest_yield_inds])
+    update_perf_dict(
+        perf_dict, kt, rr,  comp, model
+    )
+    with open("performance_excels/informer_predictions.txt", "a") as f :
+        f.write(f"============={model} predicting {comp}=============\n")
+        f.write(f"Actual: {test_rank}\n")
+        f.write(f"Predicted: {pred_rank}\n")
+        f.write(str(rr)+"\n")
+        f.write("\n")
+        f.write("\n")
+
+
 if __name__ == "__main__" :
     parser = parse_args()
 
@@ -121,7 +154,6 @@ if __name__ == "__main__" :
         cfp_array = cfp_array[:, [x for x in range(cfp_array.shape[1]) if x not in cols_to_remove]]
     
     # Initializing performance logging
-    performance_dict = {"kendall_tau":[], "reciprocal_rank":[], "test_compound":[], "model":[]}
     if "amine_ratio" in parser.test_component :
         performance_dict_list = [deepcopy(performance_dict), deepcopy(performance_dict)]
         # When 20% of all possible reaction conditions can be used
@@ -137,33 +169,65 @@ if __name__ == "__main__" :
         or parser.ibm
         or parser.ibpl
         or parser.lrt
+        or parser.baseline
     ):
-        pass
-
-    
-    if parser.baseline :
         yield_array = informer_df.to_numpy()
         if "amine_ratio" in parser.test_component :
             yield_array_list = [
-                yield_array[[x for x in range(yield_array.shape[0]) if x%8 < 4], :].T, 
+                yield_array[[x for x in range(yield_array.shape[0]) if x%8 < 4], :].T, # 11 x 20
                 yield_array[[x for x in range(yield_array.shape[0]) if x%8 >= 4], :].T
             ]
         elif "catalyst_ratio" in parser.test_component:
             yield_array_list = [
-                yield_array[[y for y in range(yield_array.shape[0]) if y%4 == x],:].T for x in range(4)
+                yield_array[[y for y in range(yield_array.shape[0]) if y%4 == x],:].T for x in range(4) # 11 x 10
             ]
         for i in range(yield_array.shape[1]) : # For each compound as test
             for j, indiv_yield_array in enumerate(yield_array_list) : 
                 test_rank = yield_to_ranking(indiv_yield_array[i, :])
-                pred_rank = yield_to_ranking(np.mean(indiv_yield_array[[x for x in range(indiv_yield_array.shape[0]) if x!=i],:], axis=0))
-                baseline_kt = kendalltau(test_rank, pred_rank.flatten()).statistic
-                predicted_highest_yield_inds = np.argpartition(pred_rank, n_rxns)[:n_rxns]
-                reciprocal_rank = 1/np.min(test_rank[predicted_highest_yield_inds])
-                performance_dict_list[j]["kendall_tau"].append(baseline_kt)
-                performance_dict_list[j]["reciprocal_rank"].append(reciprocal_rank)
-                performance_dict_list[j]["test_compound"].append(i)
-                performance_dict_list[j]["model"].append("baseline")
+                train_row_inds = [x for x in range(indiv_yield_array.shape[0]) if x!=i]
+                X_train = cfp_array[train_row_inds, :]
+                y_train = indiv_yield_array[train_row_inds,:]
+                rank_train = yield_to_ranking(y_train)
+                if parser.baseline :
+                    pred_rank = yield_to_ranking(np.mean(y_train, axis=0))
+                    evaluate_lr_alg(test_rank, pred_rank, n_rxns, performance_dict_list[j], i, "baseline")
+                    
+                if parser.rpc :
+                    std = StandardScaler()
+                    train_X_std = std.fit_transform(X_train)
+                    test_X_std = std.transform(cfp_array[i, :].reshape(1,-1))
+                    rpc_lr = RPC(
+                        base_learner=LogisticRegression(C=1), cross_validator=None
+                    )
+                    rpc_lr.fit(train_X_std, rank_train)
+                    rpc_pred_rank = rpc_lr.predict(test_X_std)
+                    evaluate_lr_alg(test_rank, rpc_pred_rank, n_rxns, performance_dict_list[j], i, "RPC")
 
+                if parser.lrrf:
+                    lrrf = LabelRankingRandomForest(n_estimators=50)
+                    lrrf.fit(X_train, rank_train)
+                    lrrf_pred_rank = lrrf.predict(cfp_array[i, :].reshape(1,-1))
+                    evaluate_lr_alg(test_rank, lrrf_pred_rank, n_rxns, performance_dict_list[j], i, "LRRF")
+
+                if parser.lrt:
+                    lrt = DecisionTreeLabelRanker(
+                        random_state=42, min_samples_split=rank_train.shape[1] * 2
+                    )
+                    lrt.fit(X_train, rank_train)
+                    lrt_pred_rank = lrt.predict(cfp_array[i, :].reshape(1,-1))
+                    evaluate_lr_alg(test_rank, lrt_pred_rank, n_rxns, performance_dict_list[j], i, "LRT")
+
+                if parser.ibm :
+                    ibm = IBLR_M(n_neighbors=3, metric="euclidean")
+                    ibm.fit(X_train, rank_train)
+                    ibm_pred_rank = ibm.predict(cfp_array[i, :].reshape(1,-1))
+                    evaluate_lr_alg(test_rank, ibm_pred_rank, n_rxns, performance_dict_list[j], i, "IBM")
+                    
+                if parser.ibpl :
+                    ibpl = IBLR_PL(n_neighbors=3, metric="euclidean")
+                    ibpl.fit(X_train, rank_train)
+                    ibpl_pred_rank = ibpl.predict(cfp_array[i, :].reshape(1,-1))
+                    evaluate_lr_alg(test_rank, ibpl_pred_rank, n_rxns, performance_dict_list[j], i, "IBPL")
 
     # Training a random forest regressor
     if parser.rfr :
@@ -201,7 +265,6 @@ if __name__ == "__main__" :
             ]
             test_fold = np.repeat(np.arange(11), 10)
             inner_test_fold = np.repeat(np.arange(10), 10)
-            print(X_list[0].shape, X_list[1].shape, np.unique(X_list[0][:,-2]))
 
         for a, (X, y) in enumerate(zip(X_list, y_list)) :
             ps = PredefinedSplit(test_fold)
@@ -226,9 +289,14 @@ if __name__ == "__main__" :
                 kt = kendalltau(y_ranking, yield_to_ranking(y_pred).flatten()).statistic
                 largest_yield_inds = np.argpartition(-1*y_pred, n_rxns)[:n_rxns]
                 reciprocal_rank = 1/np.min(y_ranking[largest_yield_inds])
+                mean_reciprocal_rank = np.mean(np.reciprocal(y_ranking[largest_yield_inds]))
 
                 performance_dict_list[a]["kendall_tau"].append(kt)
                 performance_dict_list[a]["reciprocal_rank"].append(reciprocal_rank)
                 performance_dict_list[a]["test_compound"].append(i)
                 performance_dict_list[a]["model"].append("rfr")
-    print(performance_dict_list)
+    if parser.save :
+        joblib.dump(
+            performance_dict_list, 
+            f"performance_excels/informer_performance_dict_{parser.test_component[0]}.joblib"
+        )
