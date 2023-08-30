@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import argparse
 import joblib
+from itertools import combinations
 from copy import deepcopy
 from dataset_utils import *
 from label_ranking import *
@@ -16,7 +17,7 @@ from scipy.stats import kendalltau
 
 # This script runs leave-one-substrate out. 
 
-performance_dict = {"kendall_tau":[], "reciprocal_rank":[], "test_compound":[], "model":[]}
+performance_dict = {"kendall_tau":[], "reciprocal_rank":[], "mean_reciprocal_rank":[], "test_compound":[], "model":[]}
 
 
 def parse_args():
@@ -56,6 +57,16 @@ def parse_args():
         "--ibpl",
         action="store_true",
         help="Include Instance-based label ranking with Plackett=Luce model as in Hüllermeier, 2010",
+    )
+    parser.add_argument(
+        "--boost_lrt",
+        action="store_true",
+        help="Include boosting with LRT as base learner."
+    )
+    parser.add_argument(
+        "--boost_rpc",
+        action="store_true",
+        help="Include boosting with pairwise LR as base learner."
     )
     parser.add_argument(
         "--baseline",
@@ -100,20 +111,21 @@ def prep_data(feature_type, output_type, test_component):
     pass
 
 
-def update_perf_dict(perf_dict, kt, rr, comp, model):
+def update_perf_dict(perf_dict, kt, rr, mrr, comp, model):
     perf_dict["kendall_tau"].append(kt)
     perf_dict["reciprocal_rank"].append(rr)
+    perf_dict["mean_reciprocal_rank"].append(mrr)
     perf_dict["test_compound"].append(comp)
     perf_dict["model"].append(model)
-    # return perf_dict
 
 
 def evaluate_lr_alg(test_rank, pred_rank, n_rxns, perf_dict, comp, model) :
     kt = kendalltau(test_rank, pred_rank).statistic
     predicted_highest_yield_inds = np.argpartition(pred_rank.flatten(), n_rxns)[:n_rxns]
     rr = 1/np.min(test_rank[predicted_highest_yield_inds])
+    mrr = np.mean(np.reciprocal(test_rank[predicted_highest_yield_inds], dtype=np.float32))
     update_perf_dict(
-        perf_dict, kt, rr,  comp, model
+        perf_dict, kt, rr, mrr, comp, model
     )
     with open("performance_excels/informer_predictions.txt", "a") as f :
         f.write(f"============={model} predicting {comp}=============\n")
@@ -126,7 +138,6 @@ def evaluate_lr_alg(test_rank, pred_rank, n_rxns, perf_dict, comp, model) :
 
 if __name__ == "__main__" :
     parser = parse_args()
-
     # Load dataset
     informer_df = pd.read_excel("datasets/Informer.xlsx").iloc[:40,:]
     desc_df = pd.read_excel("datasets/Informer.xlsx", sheet_name="descriptors", usecols=[0,1,2,3,4]).iloc[:40, :]
@@ -192,16 +203,24 @@ if __name__ == "__main__" :
                     pred_rank = yield_to_ranking(np.mean(y_train, axis=0))
                     evaluate_lr_alg(test_rank, pred_rank, n_rxns, performance_dict_list[j], i, "baseline")
                     
-                if parser.rpc :
+                if parser.rpc or parser.boost_rpc :
                     std = StandardScaler()
                     train_X_std = std.fit_transform(X_train)
                     test_X_std = std.transform(cfp_array[i, :].reshape(1,-1))
-                    rpc_lr = RPC(
-                        base_learner=LogisticRegression(C=1), cross_validator=None
-                    )
-                    rpc_lr.fit(train_X_std, rank_train)
-                    rpc_pred_rank = rpc_lr.predict(test_X_std)
-                    evaluate_lr_alg(test_rank, rpc_pred_rank, n_rxns, performance_dict_list[j], i, "RPC")
+                    if parser.rpc :
+                        rpc_lr = RPC(
+                            base_learner=LogisticRegression(C=1), cross_validator=None
+                        )
+                        rpc_lr.fit(train_X_std, rank_train)
+                        rpc_pred_rank = rpc_lr.predict(test_X_std)
+                        evaluate_lr_alg(test_rank, rpc_pred_rank, n_rxns, performance_dict_list[j], i, "RPC")
+                    if parser.boost_rpc :
+                        boost_rpc = BoostLR(
+                            RPC(base_learner=LogisticRegression(C=1), cross_validator=None)
+                        )
+                        boost_rpc.fit(train_X_std, rank_train)
+                        boost_rpc_pred_rank = boost_rpc.predict(test_X_std)
+                        evaluate_lr_alg(test_rank, boost_rpc_pred_rank, n_rxns, performance_dict_list[j], i, "BoostRPC")
 
                 if parser.lrrf:
                     lrrf = LabelRankingRandomForest(n_estimators=50)
@@ -228,6 +247,12 @@ if __name__ == "__main__" :
                     ibpl.fit(X_train, rank_train)
                     ibpl_pred_rank = ibpl.predict(cfp_array[i, :].reshape(1,-1))
                     evaluate_lr_alg(test_rank, ibpl_pred_rank, n_rxns, performance_dict_list[j], i, "IBPL")
+
+                if parser.boost_lrt :
+                    boost_lrt = BoostLR(DecisionTreeLabelRanker(min_samples_split=rank_train.shape[1] * 2))
+                    boost_lrt.fit(X_train, rank_train)
+                    blrt_pred_rank = boost_lrt.predict(cfp_array[i, :].reshape(1,-1))
+                    evaluate_lr_alg(test_rank, blrt_pred_rank, n_rxns, performance_dict_list[j], i, "BoostLRT")
 
     # Training a random forest regressor
     if parser.rfr :
@@ -289,14 +314,15 @@ if __name__ == "__main__" :
                 kt = kendalltau(y_ranking, yield_to_ranking(y_pred).flatten()).statistic
                 largest_yield_inds = np.argpartition(-1*y_pred, n_rxns)[:n_rxns]
                 reciprocal_rank = 1/np.min(y_ranking[largest_yield_inds])
-                mean_reciprocal_rank = np.mean(np.reciprocal(y_ranking[largest_yield_inds]))
+                mean_reciprocal_rank = np.mean(np.reciprocal(y_ranking[largest_yield_inds], dtype=np.float32))
 
                 performance_dict_list[a]["kendall_tau"].append(kt)
                 performance_dict_list[a]["reciprocal_rank"].append(reciprocal_rank)
+                performance_dict_list[a]["mean_reciprocal_rank"].append(mean_reciprocal_rank)
                 performance_dict_list[a]["test_compound"].append(i)
                 performance_dict_list[a]["model"].append("rfr")
     if parser.save :
         joblib.dump(
             performance_dict_list, 
-            f"performance_excels/informer_performance_dict_{parser.test_component[0]}.joblib"
+            f"performance_excels/informer_performance_dict_{parser.test_component[0]}_boost.joblib"
         )
