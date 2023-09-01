@@ -18,11 +18,11 @@ from sklearn.metrics import mean_squared_error, r2_score
 from scipy.stats import kendalltau
 
 PERFORMANCE_DICT = {
-    "kendall_tau":[], 
-    "reciprocal_rank":[], 
-    "mean_reciprocal_rank":[], 
-    "test_compound":[], 
-    "model":[]
+    "kendall_tau": [],
+    "reciprocal_rank": [],
+    "mean_reciprocal_rank": [],
+    "test_compound": [],
+    "model": [],
 }
 SUBSTRATE_SMILES = [
     "OCCCCC1=CC=CC=C1",
@@ -56,8 +56,9 @@ SUBSTRATE_SMILES = [
     "O=C1C(O)CCO1",
     "O=C1C=C[C@@]2(C)C(CC[C@]([C@@](CC[C@@]3(C(CO)=O)O)([H])[C@]3(C)C4)([H])[C@]2([H])C4=O)=C1",
     "OC[C@@H](C(OC)=O)NC(C1=CC=CC=C1)(C2=CC=CC=C2)C3=CC=CC=C3",
-    "C[C@@]12CC[C@]3([H])[C@]4(OO2)[C@@](O[C@H](O)[C@H](C)C4CC[C@H]3C)([H])O1"
+    "C[C@@]12CC[C@]3([H])[C@]4(OO2)[C@@](O[C@H](O)[C@H](C)C4CC[C@H]3C)([H])O1",
 ]
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Select the models to evaluate.")
@@ -100,12 +101,12 @@ def parse_args():
     parser.add_argument(
         "--boost_lrt",
         action="store_true",
-        help="Include boosting with LRT as base learner."
+        help="Include boosting with LRT as base learner.",
     )
     parser.add_argument(
         "--boost_rpc",
         action="store_true",
-        help="Include boosting with pairwise LR as base learner."
+        help="Include boosting with pairwise LR as base learner.",
     )
     parser.add_argument(
         "--baseline",
@@ -131,67 +132,101 @@ def parse_args():
 
 
 def load_data(feature_type, output_type, label_component):
-    """ Prepares dataset for different algorithm types, feature inputs and labels.
-    
+    """Prepares dataset for different algorithm types, feature inputs and labels.
+
     Parameters
     ----------
     feature_type : str {'onehot', 'desc', 'fp'}
         Input format.
         When fp, it is only for the substrate - we use descriptors for base and sulfonyl fluorides.
-        
+
     output_type : str {'yield', 'ranking'}
         Type of algorithm the dataset will be used for.
-    
+
     label_component : str {'sulfonyl_fluoride', 'base', 'both'}
         Considered only when output_type=='ranking'.
         Which component will be used as labels, which are subject to ranking.
-    
+
     Returns
     -------
     X, y : np.2darray and 1darray of shape (n_samples, n_features) and (n_samples,)
         Arrays ready to be used for algorithms.
     """
-    if feature_type == "desc" :
-        raw_descriptors = pd.read_csv("datasets/deoxyfluorination/descriptor_table.csv").to_numpy()
+    if feature_type == "desc":
+        raw_descriptors = pd.read_csv(
+            "datasets/deoxyfluorination/descriptor_table.csv"
+        ).to_numpy()
         n_substrate_desc = 19
         n_base_desc = 1
     elif feature_type == "onehot":
-        raw_descriptors = pd.read_csv("datasets/deoxyfluorination/descriptor_table-OHE.csv").to_numpy()
+        raw_descriptors = pd.read_csv(
+            "datasets/deoxyfluorination/descriptor_table-OHE.csv"
+        ).to_numpy()
         n_substrate_desc = 32
         n_base_desc = 4
-    elif feature_type == "fp" :
+    elif feature_type == "fp":
         mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
         fp_array = np.zeros((len(SUBSTRATE_SMILES), 1024))
-        for i, smiles in enumerate(SUBSTRATE_SMILES) :
+        for i, smiles in enumerate(SUBSTRATE_SMILES):
             fp_array[i] = mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(smiles))
-        raw_descriptors = np.hstack((
-            np.repeat(fp_array, 20, axis=0),
-            pd.read_csv("datasets/deoxyfluorination/descriptor_table.csv").to_numpy()[:,19:]
-        ))
+        raw_descriptors = np.hstack(
+            (
+                np.repeat(fp_array, 20, axis=0),
+                pd.read_csv(
+                    "datasets/deoxyfluorination/descriptor_table.csv"
+                ).to_numpy()[:, 19:],
+            )
+        )
         n_substrate_desc = 1024
         n_base_desc = 1
-        
-    raw_yields = pd.read_csv("datasets/deoxyfluorination/observed_yields.csv", header=None).to_numpy().flatten()
+
+    raw_yields = (
+        pd.read_csv("datasets/deoxyfluorination/observed_yields.csv", header=None)
+        .to_numpy()
+        .flatten()
+    )
 
     if output_type == "ranking":
         if label_component == "both":
-            # X = raw_descriptors[[20*x for x in range(32)], :n_substrate_desc]
-            X = raw_descriptors[:, :n_substrate_desc]
-            y = yield_to_ranking(raw_yields.reshape(32,20))
+            X = raw_descriptors[[20 * x for x in range(32)], :n_substrate_desc]
+            y = yield_to_ranking(raw_yields.reshape(32, 20))
         elif label_component == "sulfonyl_fluoride":
-            X = np.hstack((
-                np.repeat(raw_descriptors[[20*x for x in range(32)], :n_substrate_desc], 4, axis=0), # 4 = number of bases
-                np.tile(raw_descriptors[[5*x for x in range(4)], n_substrate_desc:n_substrate_desc+n_base_desc], (32,1)) # base descriptors
-            ))
-            y = yield_to_ranking(raw_yields.reshape(32*4,5))
+            X = np.hstack(
+                (
+                    np.repeat(
+                        raw_descriptors[[20 * x for x in range(32)], :n_substrate_desc],
+                        4,
+                        axis=0,
+                    ),  # 4 = number of bases
+                    np.tile(
+                        raw_descriptors[
+                            [5 * x for x in range(4)],
+                            n_substrate_desc : n_substrate_desc + n_base_desc,
+                        ],
+                        (32, 1),
+                    ),  # base descriptors
+                )
+            )
+            y = yield_to_ranking(raw_yields.reshape(32 * 4, 5))
         elif label_component == "base":
-            X = np.hstack((
-                np.repeat(raw_descriptors[[20*x for x in range(32)], :n_substrate_desc], 5, axis=0), # 5 = number of sulfonyl_fluoride
-                np.tile(raw_descriptors[[x for x in range(5)], n_substrate_desc+n_base_desc:], (32,1))
-            ))
-            y = yield_to_ranking(raw_yields.reshape(32*5,4))
+            X = np.hstack(
+                (
+                    np.repeat(
+                        raw_descriptors[[20 * x for x in range(32)], :n_substrate_desc],
+                        5,
+                        axis=0,
+                    ),  # 5 = number of sulfonyl_fluoride
+                    np.tile(
+                        raw_descriptors[
+                            [x for x in range(5)], n_substrate_desc + n_base_desc :
+                        ],
+                        (32, 1),
+                    ),
+                )
+            )
+            y = yield_to_ranking(raw_yields.reshape(32 * 5, 4))
 
-    elif output_type == "yield" :
+    elif output_type == "yield":
         X = raw_descriptors
         y = raw_yields
     print("X array shape:", X.shape, "y array shape", y.shape)
@@ -199,45 +234,56 @@ def load_data(feature_type, output_type, label_component):
 
 
 def update_perf_dict(perf_dict, kt, rr, mrr, comp, model):
-    if type(kt) == float :
+    if type(kt) != list:
         perf_dict["kendall_tau"].append(kt)
         perf_dict["reciprocal_rank"].append(rr)
         perf_dict["mean_reciprocal_rank"].append(mrr)
         perf_dict["test_compound"].append(comp)
         perf_dict["model"].append(model)
-    elif type(kt) == list :
+    elif type(kt) == list:
         assert len(kt) == len(rr)
         assert len(rr) == len(mrr)
         perf_dict["kendall_tau"].extend(kt)
         perf_dict["reciprocal_rank"].extend(rr)
         perf_dict["mean_reciprocal_rank"].extend(mrr)
-        if type(comp) == list :
+        if type(comp) == list:
             perf_dict["test_compound"].extend(comp)
-        elif type(comp) == int :
-            perf_dict["test_compound"].extend([comp]*len(kt))
+        elif type(comp) == int:
+            perf_dict["test_compound"].extend([comp] * len(kt))
         if type(model) == "list":
             perf_dict["model"].extend(model)
         elif type(model) == str:
-            perf_dict["model"].extend([model]*len(kt))
+            perf_dict["model"].extend([model] * len(kt))
 
 
-def evaluate_lr_alg(test_rank, pred_rank, n_rxns, perf_dict, comp, model) :
+def evaluate_lr_alg(test_rank, pred_rank, n_rxns, perf_dict, comp, model):
     if label_component == "both":
         kt = kendalltau(test_rank, pred_rank).statistic
-        predicted_highest_yield_inds = np.argpartition(pred_rank.flatten(), n_rxns)[:n_rxns]
-        rr = 1/np.min(test_rank[predicted_highest_yield_inds])
-        mrr = np.mean(np.reciprocal(test_rank[predicted_highest_yield_inds], dtype=np.float32))
-    else :
-        kt = [kendalltau(test_rank[i,:], pred_rank[i,:]).statistic for i in range(test_rank.shape[0])]
-        rr = [1/test_rank[a,x] for a, x in enumerate(np.argmin(pred_rank, axis=1))]
+        predicted_highest_yield_inds = np.argpartition(pred_rank.flatten(), n_rxns)[
+            :n_rxns
+        ]
+        rr = 1 / np.min(test_rank[predicted_highest_yield_inds])
+        mrr = np.mean(
+            np.reciprocal(test_rank[predicted_highest_yield_inds], dtype=np.float32)
+        )
+    else:
+        kt = [
+            kendalltau(test_rank[i, :], pred_rank[i, :]).statistic
+            for i in range(test_rank.shape[0])
+        ]
+        rr = [1 / test_rank[a, x] for a, x in enumerate(np.argmin(pred_rank, axis=1))]
         mrr = rr
-        
-    update_perf_dict(
-        perf_dict, kt, rr, mrr, comp, model
-    )
-        
 
-def rfr_eval(feature_type, label_component, n_rxns, params={"n_estimators":[30,100,200], "max_depth":[5,10,None]}, random_state=42):
+    update_perf_dict(PERFORMANCE_DICT, kt, rr, mrr, comp, model)
+
+
+def rfr_eval(
+    feature_type,
+    label_component,
+    n_rxns,
+    params={"n_estimators": [30, 100, 200], "max_depth": [5, 10, None]},
+    random_state=42,
+):
     X, y = load_data(feature_type, "yield", label_component)
     # print(y.shape)
     # For now let's use whole dataset. TODO divide datasets so that the non-label-component values are fixed.
@@ -254,7 +300,7 @@ def rfr_eval(feature_type, label_component, n_rxns, params={"n_estimators":[30,1
             param_grid=params,
             scoring="r2",
             n_jobs=-1,
-            cv=PredefinedSplit(inner_test_fold)
+            cv=PredefinedSplit(inner_test_fold),
         )
         gcv.fit(X_train, y_train)
         y_pred = gcv.best_estimator_.predict(X_test)
@@ -262,88 +308,126 @@ def rfr_eval(feature_type, label_component, n_rxns, params={"n_estimators":[30,1
             # print(f"    Test compound {i} - RMSE={round(mean_squared_error(y_test, y_pred, squared=False), 1)}, R2={round(r2_score(y_test, y_pred), 2)}")
             y_ranking = yield_to_ranking(y_test)
             kt = kendalltau(y_ranking, yield_to_ranking(y_pred).flatten()).statistic
-            largest_yield_inds = np.argpartition(-1*y_pred, n_rxns)[:n_rxns]
-            reciprocal_rank = 1/np.min(y_ranking[largest_yield_inds])
-            mean_reciprocal_rank = np.mean(np.reciprocal(y_ranking[largest_yield_inds], dtype=np.float32))
-        else : 
+            largest_yield_inds = np.argpartition(-1 * y_pred, n_rxns)[:n_rxns]
+            reciprocal_rank = 1 / np.min(y_ranking[largest_yield_inds])
+            mean_reciprocal_rank = np.mean(
+                np.reciprocal(y_ranking[largest_yield_inds], dtype=np.float32)
+            )
+        else:
             if label_component == "base":
-                y_pred = yield_to_ranking(np.reshape(y_pred, (4,5)).T)
-                y_ranking = yield_to_ranking(np.reshape(y_test, (4,5)).T)
+                y_pred = yield_to_ranking(np.reshape(y_pred, (4, 5)).T)
+                y_ranking = yield_to_ranking(np.reshape(y_test, (4, 5)).T)
             elif label_component == "sulfonyl_fluoride":
-                y_pred = yield_to_ranking(np.reshape(y_pred, (4,5)))
-                y_ranking = yield_to_ranking(np.reshape(y_test, (4,5)))
+                y_pred = yield_to_ranking(np.reshape(y_pred, (4, 5)))
+                y_ranking = yield_to_ranking(np.reshape(y_test, (4, 5)))
             # print("Y_ranking", y_ranking)
-            kt = [kendalltau(y_ranking[i,:], y_pred[i,:]).statistic for i in range(y_pred.shape[0])]
-            reciprocal_rank = [1/y_ranking[a,x] for a, x in enumerate(np.argmin(y_pred, axis=1))]
+            kt = [
+                kendalltau(y_ranking[i, :], y_pred[i, :]).statistic
+                for i in range(y_pred.shape[0])
+            ]
+            reciprocal_rank = [
+                1 / y_ranking[a, x] for a, x in enumerate(np.argmin(y_pred, axis=1))
+            ]
             mean_reciprocal_rank = reciprocal_rank
 
-        update_perf_dict(PERFORMANCE_DICT, kt, reciprocal_rank, mean_reciprocal_rank, i, "rfr")
+        update_perf_dict(
+            PERFORMANCE_DICT, kt, reciprocal_rank, mean_reciprocal_rank, i, "rfr"
+        )
     print()
 
 
 def lr_eval(feature_type, label_component, parser, n_rxns):
     X, y = load_data(feature_type, "ranking", label_component)
-    if parser.baseline : 
+    if parser.baseline:
         _, y_yields = load_data(feature_type, "yield", label_component)
         y_yields = y_yields.reshape(y.shape)
 
-    test_fold = np.repeat(np.arange(32), int(y.shape[0]//32))
+    test_fold = np.repeat(np.arange(32), int(y.shape[0] // 32))
     # print("RPC Test fold shape:", test_fold.shape)
     ps = PredefinedSplit(test_fold)
     for i, (train_ind, test_ind) in enumerate(ps.split()):
         X_train, X_test = X[train_ind, :], X[test_ind, :]
         rank_train, test_rank = y[train_ind, :], y[test_ind, :]
-        if label_component == "both" : 
+        if label_component == "both":
             test_rank = test_rank.flatten()
         # print("Test rank shape:", test_rank.shape)
-        
-        if parser.baseline :
-            pred_rank = yield_to_ranking(np.mean(y_yields[train_ind,:], axis=0))
+
+        if parser.baseline:
+            pred_rank = yield_to_ranking(np.mean(y_yields[train_ind, :], axis=0))
             # print("Actual rank:", test_rank)
             if label_component == "both":
-                evaluate_lr_alg(test_rank, pred_rank, n_rxns, PERFORMANCE_DICT, i, "baseline")
-            elif label_component == "base" :
-                evaluate_lr_alg(test_rank, np.tile(pred_rank, (5,1)), n_rxns, PERFORMANCE_DICT, i, "baseline")
-            elif label_component == "sulfonyl_fluoride" :
-                evaluate_lr_alg(test_rank, np.tile(pred_rank, (4,1)), n_rxns, PERFORMANCE_DICT, i, "baseline")
-                    
-        if parser.rpc or parser.boost_rpc or parser.ibm or parser.ibpl :
+                evaluate_lr_alg(
+                    test_rank, pred_rank, n_rxns, PERFORMANCE_DICT, i, "baseline"
+                )
+            elif label_component == "base":
+                evaluate_lr_alg(
+                    test_rank,
+                    np.tile(pred_rank, (5, 1)),
+                    n_rxns,
+                    PERFORMANCE_DICT,
+                    i,
+                    "baseline",
+                )
+            elif label_component == "sulfonyl_fluoride":
+                evaluate_lr_alg(
+                    test_rank,
+                    np.tile(pred_rank, (4, 1)),
+                    n_rxns,
+                    PERFORMANCE_DICT,
+                    i,
+                    "baseline",
+                )
+
+        if parser.rpc or parser.boost_rpc or parser.ibm or parser.ibpl:
             std = StandardScaler()
             train_X_std = std.fit_transform(X_train)
             test_X_std = std.transform(X_test)
-            if parser.rpc :
-                rpc_lr = RPC(
-                    base_learner=LogisticRegression(C=1), cross_validator=None
-                )
+            if parser.rpc:
+                rpc_lr = RPC(base_learner=LogisticRegression(C=1), cross_validator=None)
                 rpc_lr.fit(train_X_std, rank_train)
                 rpc_pred_rank = rpc_lr.predict(test_X_std)
                 # print("RPC predicted rank:", rpc_pred_rank)
                 # print("Actual rank:", test_rank)
-                evaluate_lr_alg(test_rank, rpc_pred_rank, n_rxns, PERFORMANCE_DICT, i, "RPC")
-            if parser.boost_rpc :
+                evaluate_lr_alg(
+                    test_rank, rpc_pred_rank, n_rxns, PERFORMANCE_DICT, i, "RPC"
+                )
+            if parser.boost_rpc:
                 boost_rpc = BoostLR(
                     RPC(base_learner=LogisticRegression(C=1), cross_validator=None)
                 )
                 boost_rpc.fit(train_X_std, rank_train)
                 boost_rpc_pred_rank = boost_rpc.predict(test_X_std)
-                evaluate_lr_alg(test_rank, boost_rpc_pred_rank, n_rxns, PERFORMANCE_DICT, i, "BoostRPC")
-            if parser.ibm :
+                evaluate_lr_alg(
+                    test_rank,
+                    boost_rpc_pred_rank,
+                    n_rxns,
+                    PERFORMANCE_DICT,
+                    i,
+                    "BoostRPC",
+                )
+            if parser.ibm:
                 ibm = IBLR_M(n_neighbors=3, metric="euclidean")
                 ibm.fit(X_train, rank_train)
                 ibm_pred_rank = ibm.predict(test_X_std)
-                evaluate_lr_alg(test_rank, ibm_pred_rank, n_rxns, PERFORMANCE_DICT, i, "IBM")
-                
-            if parser.ibpl :
+                evaluate_lr_alg(
+                    test_rank, ibm_pred_rank, n_rxns, PERFORMANCE_DICT, i, "IBM"
+                )
+
+            if parser.ibpl:
                 ibpl = IBLR_PL(n_neighbors=3, metric="euclidean")
                 ibpl.fit(X_train, rank_train)
                 ibpl_pred_rank = ibpl.predict(test_X_std)
-                evaluate_lr_alg(test_rank, ibpl_pred_rank, n_rxns, PERFORMANCE_DICT, i, "IBPL")
+                evaluate_lr_alg(
+                    test_rank, ibpl_pred_rank, n_rxns, PERFORMANCE_DICT, i, "IBPL"
+                )
 
         if parser.lrrf:
             lrrf = LabelRankingRandomForest(n_estimators=50)
             lrrf.fit(X_train, rank_train)
             lrrf_pred_rank = lrrf.predict(X_test)
-            evaluate_lr_alg(test_rank, lrrf_pred_rank, n_rxns, PERFORMANCE_DICT, i, "LRRF")
+            evaluate_lr_alg(
+                test_rank, lrrf_pred_rank, n_rxns, PERFORMANCE_DICT, i, "LRRF"
+            )
 
         if parser.lrt:
             lrt = DecisionTreeLabelRanker(
@@ -351,21 +435,27 @@ def lr_eval(feature_type, label_component, parser, n_rxns):
             )
             lrt.fit(X_train, rank_train)
             lrt_pred_rank = lrt.predict(X_test)
-            evaluate_lr_alg(test_rank, lrt_pred_rank, n_rxns, PERFORMANCE_DICT, i, "LRT")
+            evaluate_lr_alg(
+                test_rank, lrt_pred_rank, n_rxns, PERFORMANCE_DICT, i, "LRT"
+            )
 
-        if parser.boost_lrt :
-            boost_lrt = BoostLR(DecisionTreeLabelRanker(min_samples_split=rank_train.shape[1] * 2))
+        if parser.boost_lrt:
+            boost_lrt = BoostLR(
+                DecisionTreeLabelRanker(min_samples_split=rank_train.shape[1] * 2)
+            )
             boost_lrt.fit(X_train, rank_train)
             blrt_pred_rank = boost_lrt.predict(X_test)
-            evaluate_lr_alg(test_rank, blrt_pred_rank, n_rxns, PERFORMANCE_DICT, i, "BoostLRT")
+            evaluate_lr_alg(
+                test_rank, blrt_pred_rank, n_rxns, PERFORMANCE_DICT, i, "BoostLRT"
+            )
 
 
-if __name__ ==  "__main__" :
+if __name__ == "__main__":
     parser = parse_args()
-    if len(parser.label_component) == 2 :
+    if len(parser.label_component) == 2:
         label_component = "both"
         n_rxns = 4
-    elif len(parser.label_component) == 1 :
+    elif len(parser.label_component) == 1:
         label_component = parser.label_component[0]
         n_rxns = 1
 
@@ -382,10 +472,10 @@ if __name__ ==  "__main__" :
         lr_eval(parser.adversarial, label_component, parser, n_rxns)
 
     # Training a random forest regressor
-    if parser.rfr :
+    if parser.rfr:
         rfr_eval(parser.adversarial, label_component, n_rxns)
-    if parser.save :
+    if parser.save:
         joblib.dump(
-            PERFORMANCE_DICT, 
-            f"performance_excels/deoxy_performance_dict_{label_component}_{parser.adversarial}.joblib"
+            PERFORMANCE_DICT,
+            f"performance_excels/deoxy_performance_dict_{label_component}_{parser.adversarial}.joblib",
         )

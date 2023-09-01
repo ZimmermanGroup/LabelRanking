@@ -28,34 +28,36 @@ BASE_DESC = pd.read_csv("datasets/doyle_data/base_DFT.csv")
 FEATURE_DF_LIST = [ARYL_HALIDE_DESC, ADDITIVE_DESC, BASE_DESC, LIGAND_DESC]
 ### Preparing adversarial control inputs
 np.random.seed(42)
+
+
 def prep_random_desc(desc_df):
-    """ Prepares random features to use as adversarial controls and also be compatible to previously written functions. 
-    
+    """Prepares random features to use as adversarial controls and also be compatible to previously written functions.
+
     Parameters
     ----------
     desc_df : pd.DataFrame
         Original dft calculated values.
-    
+
     Returns
     -------
     random_df : pd.DataFrame
         Dataframe with random feature values.
     """
     desc_np = desc_df.to_numpy()
-    desc_np[:,:-1] = np.random.normal(size=(desc_np.shape[0], desc_np.shape[1]-1))
+    desc_np[:, :-1] = np.random.normal(size=(desc_np.shape[0], desc_np.shape[1] - 1))
     random_df = pd.DataFrame(desc_np)
     random_df.columns = desc_df.columns
     return random_df
 
 
-def prep_onehot_desc(desc_df) :
-    """ Prepares onehot vectors of each component to use as adversarial controls and also be compatible to previously written functions. 
-    
+def prep_onehot_desc(desc_df):
+    """Prepares onehot vectors of each component to use as adversarial controls and also be compatible to previously written functions.
+
     Parameters
     ----------
     desc_df : pd.DataFrame
         Original dft calculated values.
-    
+
     Returns
     -------
     onehot_df : pd.DataFrame
@@ -64,7 +66,7 @@ def prep_onehot_desc(desc_df) :
     n_comps = desc_df.shape[0]
     onehot_array = np.identity(n_comps)
     onehot_df = pd.DataFrame(onehot_array)
-    onehot_df["name"] = desc_df.iloc[:,-1]
+    onehot_df["name"] = desc_df.iloc[:, -1]
     return onehot_df
 
 
@@ -296,14 +298,16 @@ def name_ranking_df_to_features(name_df, feature_df_list=FEATURE_DF_LIST):
     for i, row in name_df.iterrows():
         list_of_desc_arrays = []
         list_of_desc_arrays.append(
-        feature_df_list[0][feature_df_list[0]["name"] == row.name[0]].values[0][:-1]
+            feature_df_list[0][feature_df_list[0]["name"] == row.name[0]].values[0][:-1]
         )
         list_of_desc_arrays.append(
             feature_df_list[1][feature_df_list[1]["name"] == row.name[1]].values[0][:-1]
         )
         if "base" in name_df.index.names:
             list_of_desc_arrays.append(
-                feature_df_list[2][feature_df_list[2]["name"] == row.name[2]].values[0][:-1]
+                feature_df_list[2][feature_df_list[2]["name"] == row.name[2]].values[0][
+                    :-1
+                ]
             )
         if "ligand" in name_df.index.names:
             list_of_desc_arrays.append(
@@ -518,9 +522,9 @@ if __name__ == "__main__":
     print(parser)
     print()
 
-    if parser.adversarial is None :
+    if parser.adversarial is None:
         feature_list = []
-    else :
+    else:
         feature_list = parser.adversarial
     org_doyle_df = prep_full_doyle_df(parser.test_component)
     print()
@@ -555,8 +559,8 @@ if __name__ == "__main__":
     if parser.lrrf or parser.rpc or parser.ibm or parser.ibpl or parser.lrt:
         performance_dict_list = [deepcopy(performance_dict)]
         # rpc_performance_dict_dft = deepcopy(performance_dict)
-        if parser.adversarial is not None :
-            for i in range(len(parser.adversarial)) :
+        if parser.adversarial is not None:
+            for i in range(len(parser.adversarial)):
                 performance_dict_list.append(deepcopy(performance_dict))
     if parser.baseline:
         baseline_performance_dict = deepcopy(performance_dict)
@@ -705,18 +709,24 @@ if __name__ == "__main__":
             ):
                 lr_save = True
                 for a, feature in enumerate(["dft"] + feature_list):
-                    if feature == "dft" :
+                    if feature == "dft":
                         list_of_feature_dfs = FEATURE_DF_LIST
                     elif feature == "onehot":
-                        list_of_feature_dfs = [prep_onehot_desc(x) for x in FEATURE_DF_LIST]
-                    elif feature == "random" :
-                        list_of_feature_dfs = [prep_random_desc(x) for x in FEATURE_DF_LIST]
+                        list_of_feature_dfs = [
+                            prep_onehot_desc(x) for x in FEATURE_DF_LIST
+                        ]
+                    elif feature == "random":
+                        list_of_feature_dfs = [
+                            prep_random_desc(x) for x in FEATURE_DF_LIST
+                        ]
 
                     # # Preparing arrays for label ranking models.
                     training_lr_df = df_list[1][0]
-                    train_X, train_y_rank, train_reactants = name_ranking_df_to_features(
-                        training_lr_df, list_of_feature_dfs
-                    )
+                    (
+                        train_X,
+                        train_y_rank,
+                        train_reactants,
+                    ) = name_ranking_df_to_features(training_lr_df, list_of_feature_dfs)
                     train_X = np.vstack(tuple(train_X))
                     scaler = StandardScaler()
                     train_X_std = scaler.fit_transform(train_X)
@@ -751,7 +761,13 @@ if __name__ == "__main__":
                     ]
                     std_both_OOS_X = np.vstack(tuple(list_std_both_OOS_X))
 
-                    if parser.lrrf or parser.rpc or parser.ibm or parser.ibpl or parser.lrt:
+                    if (
+                        parser.lrrf
+                        or parser.rpc
+                        or parser.ibm
+                        or parser.ibpl
+                        or parser.lrt
+                    ):
                         # print()
                         # print("Finished preparing all arrays.")
                         label_ranking_models = []
@@ -760,7 +776,8 @@ if __name__ == "__main__":
                             # print()
                             # print(f"Fitting RPC-LR with {feature} features.")
                             rpc_lr = RPC(
-                                base_learner=LogisticRegression(C=1), cross_validator=None
+                                base_learner=LogisticRegression(C=1),
+                                cross_validator=None,
                             )
                             rpc_lr.fit(train_X_std, train_y_rank)
                             label_ranking_models.append(rpc_lr)
@@ -778,14 +795,17 @@ if __name__ == "__main__":
                             # print()
                             # print("Fitting LRT")
                             lrt = DecisionTreeLabelRanker(
-                                random_state=42, min_samples_split=train_y_rank.shape[1] * 2
+                                random_state=42,
+                                min_samples_split=train_y_rank.shape[1] * 2,
                             )
                             lrt.fit(train_X_std, train_y_rank)
                             label_ranking_models.append(lrt)
                             label_ranking_names.append("LRT")
                         #     print("Complete")
                         # print()
-                        for model, name in zip(label_ranking_models, label_ranking_names):
+                        for model, name in zip(
+                            label_ranking_models, label_ranking_names
+                        ):
                             evaluate_and_update_score_dict(
                                 performance_dict_list[a],
                                 model,
@@ -892,8 +912,8 @@ if __name__ == "__main__":
                         baseline_performance_df.to_excel(
                             f"performance_excels/baseline_performance_{parser.n_iter}_{n_reactants_as_test}tests.xlsx"
                         )
-    
-    if lr_save and parser.save :
+
+    if lr_save and parser.save:
         for a, feature in enumerate(["dft"] + feature_list):
             pd.DataFrame(performance_dict_list[a]).to_excel(
                 f"performance_excels/label_ranking_performance_{parser.n_iter}_{feature}_{n_reactants_as_test}tests.xlsx"
