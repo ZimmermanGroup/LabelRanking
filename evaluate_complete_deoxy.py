@@ -13,9 +13,12 @@ from rdkit.Chem import rdFingerprintGenerator
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
 from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, r2_score
 from scipy.stats import kendalltau
+import torch
+import torch.nn.functional as nnf
 
 PERFORMANCE_DICT = {
     "kendall_tau": [],
@@ -107,6 +110,11 @@ def parse_args():
         "--boost_rpc",
         action="store_true",
         help="Include boosting with pairwise LR as base learner.",
+    )
+    parser.add_argument(
+        "--plr",
+        action="store_true",
+        help="Include logistic regression that optimizes upon precision@k."
     )
     parser.add_argument(
         "--baseline",
@@ -273,6 +281,9 @@ def evaluate_lr_alg(test_rank, pred_rank, n_rxns, perf_dict, comp, model):
         ]
         rr = [1 / test_rank[a, x] for a, x in enumerate(np.argmin(pred_rank, axis=1))]
         mrr = rr
+    print(f"Test compound {comp}")
+    print(f"    kendall-tau={kt} // reciprocal_rank={rr} // mrr={mrr}")
+    print()
 
     update_perf_dict(PERFORMANCE_DICT, kt, rr, mrr, comp, model)
 
@@ -450,6 +461,85 @@ def lr_eval(feature_type, label_component, parser, n_rxns):
             )
 
 
+def precision_lr_eval(
+        feature_type,
+        label_component,
+        n_rxns,
+    ):
+    if feature_type == "desc" :
+        n_subs_desc = 19
+    elif feature_type == "onehot" :
+        n_subs_desc = 32
+    elif feature_type == "fp" :
+        n_subs_desc = 1024
+
+    if label_component == "both" :
+        X, y = load_data(feature_type, "yield", label_component)
+        X_subs, _ = load_data(feature_type, "ranking", label_component)
+        X_cond = X[:20, n_subs_desc:]
+        y_yields = y.reshape(32, 20)
+    else :
+        X_subs, y = load_data(feature_type, "ranking", label_component)
+        components = ["sulfonyl_fluoride", "base"]
+        other_comp = components[1 - components.index(label_component)]
+        X_cond, _ = load_data(feature_type, "ranking", other_comp)
+        X_cond = X_cond[:int(20//int(X_subs.shape[0]//32)), n_subs_desc:]
+        y_yields = 100 - y
+        
+    X_cond_std = StandardScaler().fit_transform(X_cond)
+
+    # Transforming the y_yields array such that the n_rxns number of highest yielding reactions become positive labels.
+    highest_conds = np.argpartition(-1*y_yields, n_rxns)[:, :n_rxns]
+    y_multilabel = np.zeros_like(y_yields)
+    for i, col in enumerate(highest_conds) :
+        y_multilabel[i, col] = 1
+        assert sum(y_multilabel[i,:]) == n_rxns
+
+    # Evaluation
+    test_fold = np.repeat(np.arange(32), int(y_yields.shape[0] // 32))
+    ps = PredefinedSplit(test_fold)
+    for i, (train_ind, test_ind) in enumerate(ps.split()):
+        X_train_subs, X_test_subs = X_subs[train_ind, :], X_subs[test_ind, :]
+        y_ml_train = y_multilabel[train_ind]
+        std = StandardScaler()
+        X_train_subs_std = std.fit_transform(X_train_subs)
+        X_test_subs_std = std.transform(X_test_subs)
+        # Remove single valued columns
+        cols_to_keep = []
+        for j in range(X_train_subs_std.shape[1]) :
+            if len(np.unique(X_train_subs_std[:,j])) > 1 :
+                cols_to_keep.append(j)
+        X_train_subs_std = X_train_subs_std[:, cols_to_keep]
+        X_test_subs_std = X_test_subs_std[:, cols_to_keep]
+
+        grc = GridSearchCV(
+            estimator=MLPClassifier(solver="lbfgs", random_state=42+i, max_iter=10000),
+            param_grid = {
+                "hidden_layer_sizes":[
+                    (10), (20,)   #for both, was 30
+                ],
+                "activation":["logistic","relu"],  # "tanh",
+                "alpha":[0.001,0.003,0.01] #[0.0001,0.0003,0.001] # 
+            },
+            n_jobs=-1
+        )
+        grc.fit(X_train_subs_std, y_ml_train)
+        pred_ranking = yield_to_ranking(grc.predict_proba(X_test_subs_std))
+
+        
+        test_ranking = yield_to_ranking(y_yields[test_ind, :])
+        if label_component == "both":
+            test_ranking = test_ranking.flatten()
+        evaluate_lr_alg(
+            test_ranking,
+            pred_ranking,
+            n_rxns,
+            PERFORMANCE_DICT,
+            i,
+            "PrecisionOpt",
+        )
+    
+
 if __name__ == "__main__":
     parser = parse_args()
     if len(parser.label_component) == 2:
@@ -474,8 +564,19 @@ if __name__ == "__main__":
     # Training a random forest regressor
     if parser.rfr:
         rfr_eval(parser.adversarial, label_component, n_rxns)
+
+    # Training a precision optimizer
+    if parser.plr :
+        precision_lr_eval(
+            parser.adversarial,
+            label_component,
+            n_rxns,
+        )
+        print(PERFORMANCE_DICT)
+    
+    # Saving the results
     if parser.save:
         joblib.dump(
             PERFORMANCE_DICT,
-            f"performance_excels/deoxy_performance_dict_{label_component}_{parser.adversarial}.joblib",
+            f"performance_excels/deoxy_performance_dict_{label_component}_{parser.adversarial}_precision_nofeature.joblib",
         )
