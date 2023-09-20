@@ -79,7 +79,15 @@ if __name__ == "__main__":
 
     if parser.lrrf:
         model_names.append("Label Ranking Random Forest")
-        models.append(LabelRankingRandomForest(n_estimators=100, max_depth=None))
+        # models.append(LabelRankingRandomForest(n_estimators=100, max_depth=None))
+        models.append(
+            LabelRankingRandomForest(
+                cross_validator=GridSearchCV(
+                    estimator=RandomForestClassifier(random_state=42), 
+                    param_grid={"n_estimators":[10,30,100],
+                                "max_depth":[3,5,None]}
+                )
+            ))
         score_dict.update(
             {
                 "Label Ranking Random Forest": np.zeros(

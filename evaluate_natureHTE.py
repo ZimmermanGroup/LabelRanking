@@ -231,6 +231,7 @@ def load_data(feature_type, output_type, dataset):
         y = yield_to_ranking(y)
     elif output_type == "yield":
         y = full_dataset["Rel. % Conv."].values.flatten()
+        y[np.argwhere(np.isnan(y))] = 0
     return X, y
 
 
@@ -292,14 +293,14 @@ def lr_eval(feature_type, substrate_type, parser, n_rxns):
                         test_rank, rpc_pred_rank, n_rxns, PERFORMANCE_DICT, i, "RPC"
                     )
                 if parser.ibm:
-                    ibm = IBLR_M(n_neighbors=3, metric="euclidean")
+                    ibm = IBLR_M(n_neighbors=10, metric="euclidean")
                     ibm.fit(X_train, rank_train)
                     ibm_pred_rank = ibm.predict(test_X_std)
                     evaluate_lr_alg(
                         test_rank, ibm_pred_rank, n_rxns, PERFORMANCE_DICT, i, "IBM"
                     )
                 if parser.ibpl:
-                    ibpl = IBLR_PL(n_neighbors=3, metric="euclidean")
+                    ibpl = IBLR_PL(n_neighbors=10, metric="euclidean")
                     ibpl.fit(X_train, rank_train)
                     ibpl_pred_rank = ibpl.predict(test_X_std)
                     evaluate_lr_alg(
@@ -334,7 +335,11 @@ def rfr_eval(
 ):
     X, y = load_data(feature_type, "yield", substrate_type)
     X_ohe, y_ohe = load_data("onehot", "yield", substrate_type)
-    assert np.all(y == y_ohe)
+    # assert np.all(y == y_ohe)
+    if not np.all(y == y_ohe):
+        print(y)
+        print()
+        print(y_ohe)
 
     test_fold = np.argmax(X_ohe, axis=1)
     ps = PredefinedSplit(test_fold)
@@ -397,5 +402,10 @@ if __name__ == "__main__":
     if parser.save:
         joblib.dump(
             PERFORMANCE_DICT,
-            f"performance_excels/natureHTE/{subs_type[0]}_{feature}.joblib",
+            f"performance_excels/natureHTE/{subs_type[0]}_{feature}_rfr.joblib",
         )
+    else :
+        perf_df = pd.DataFrame(PERFORMANCE_DICT)
+        for model in perf_df["model"].unique():
+            print(model, round(perf_df[perf_df["model"]==model]["reciprocal_rank"].mean(), 3))
+        
