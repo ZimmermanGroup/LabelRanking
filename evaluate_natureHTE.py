@@ -26,8 +26,11 @@ RAW_DATA = pd.read_excel(
 )
 
 AMINE_DATA = RAW_DATA[RAW_DATA["Chemistry"] == "Amine"]
+AMINE_ROWS_TO_REMOVE = joblib.load("datasets/natureHTE/nature_amine_inds_to_remove.joblib")
 SULFON_DATA = RAW_DATA[RAW_DATA["Chemistry"] == "Sulfonamide"].reset_index()
+SULFON_ROWS_TO_REMOVE = joblib.load("datasets/natureHTE/nature_sulfon_inds_to_remove.joblib")
 AMIDE_DATA = RAW_DATA[RAW_DATA["Chemistry"] == "Amide"].reset_index()
+AMIDE_ROWS_TO_REMOVE = joblib.load("datasets/natureHTE/nature_amide_inds_to_remove.joblib")
 REAGENT_DATA = {}
 base_descriptors = pd.read_excel(
     "datasets/natureHTE/reagent_desc.xlsx", sheet_name="Base"
@@ -60,6 +63,11 @@ def parse_args():
         "--adversarial",
         # action="append",
         help="Whether to perform adversarial controls. Should either be fp or onehot or random.",
+    )
+    parser.add_argument(
+        "--use_full",
+        action=argparse.BooleanOptionalAction,
+        help="Whether the full dataset should be used. If False, we trim down the dominant class such that the best conditions are more balanced."
     )
     parser.add_argument(
         "--rfr", action="store_true", help="Include Random Forest Regressor."
@@ -125,7 +133,7 @@ def parse_args():
     return args
 
 
-def load_data(feature_type, output_type, dataset):
+def load_data(feature_type, output_type, dataset, use_full=True):
     """Prepares dataset for different algorithm types, feature inputs and labels.
 
     Parameters
@@ -139,6 +147,9 @@ def load_data(feature_type, output_type, dataset):
     dataset : str {'amine', 'sulfonamide', 'amide'} or list of these strings.
         Considered only when output_type=='ranking'.
         Which component will be used as labels, which are subject to ranking.
+    
+    use_full : bool
+        Whether the full dataset or a smaller, but more balanced one should be used.
 
     Returns
     -------
@@ -157,6 +168,9 @@ def load_data(feature_type, output_type, dataset):
 
     # Preparing inputs
     substrate_smiles_list = list(full_dataset["BB SMILES"].unique())
+    if use_full is False :
+        rows_to_remove_dict = {"amide":AMIDE_ROWS_TO_REMOVE, "amine":AMINE_ROWS_TO_REMOVE, "sulfonamide":SULFON_ROWS_TO_REMOVE}
+        substrate_smiles_list = [x for i, x in enumerate(substrate_smiles_list) if i not in rows_to_remove_dict[dataset[0]]]
     n_subs = len(substrate_smiles_list)
     bases = list(full_dataset["Base"].unique())
     catalysts = list(full_dataset["Catalyst"].unique())
@@ -173,14 +187,15 @@ def load_data(feature_type, output_type, dataset):
         if output_type == "yield":
             row_array = []
             for i, row in full_dataset.iterrows():
-                fp_portion = fp_array[
-                    substrate_smiles_list.index(row["BB SMILES"])
-                ].reshape(1, -1)
-                cat_descriptors = REAGENT_DATA[row["Catalyst"]].reshape(1, -1)
-                base_descriptors = REAGENT_DATA[row["Base"]].reshape(1, -1)
-                row_array.append(
-                    np.hstack((fp_portion, cat_descriptors, base_descriptors))
-                )
+                if row["BB SMILES"] in substrate_smiles_list :
+                    fp_portion = fp_array[
+                        substrate_smiles_list.index(row["BB SMILES"])
+                    ].reshape(1, -1)
+                    cat_descriptors = REAGENT_DATA[row["Catalyst"]].reshape(1, -1)
+                    base_descriptors = REAGENT_DATA[row["Base"]].reshape(1, -1)
+                    row_array.append(
+                        np.hstack((fp_portion, cat_descriptors, base_descriptors))
+                    )
             X = np.vstack(tuple(row_array))
 
     elif feature_type == "onehot":
@@ -189,19 +204,22 @@ def load_data(feature_type, output_type, dataset):
         elif output_type == "yield":
             X = np.zeros(
                 (
-                    full_dataset.shape[0],
+                    4*n_subs, # full_dataset.shape[0],
                     len(substrate_smiles_list) + len(bases) + len(catalysts),
                 )
             )
+            row_count = 0
             for i, row in full_dataset.iterrows():
-                X[
-                    i,
-                    [
-                        substrate_smiles_list.index(row["BB SMILES"]),
-                        n_subs + catalysts.index(row["Catalyst"]),
-                        n_subs + len(catalysts) + bases.index(row["Base"]),
-                    ],
-                ] = 1
+                if row["BB SMILES"] in substrate_smiles_list :
+                    X[
+                        row_count,
+                        [
+                            substrate_smiles_list.index(row["BB SMILES"]),
+                            n_subs + catalysts.index(row["Catalyst"]),
+                            n_subs + len(catalysts) + bases.index(row["Base"]),
+                        ],
+                    ] = 1        
+                    row_count += 1    
 
     elif feature_type == "random":
         if output_type in ["ranking", "multiclass"]:
@@ -211,28 +229,32 @@ def load_data(feature_type, output_type, dataset):
                 3, size=(n_subs, 1024)
             )  # to simulate count FP
             reagent_random_desc = np.random.rand(4, 12)  # there are 12 descriptors
-            X = np.zeros((full_dataset.shape[0], 1036))
+            X = np.zeros((4*n_subs, 1036)) #full_dataset.shape[0]
+            row_count = 0
             for i, row in full_dataset.iterrows():
-                X[i] = np.concatenate(
-                    (
-                        substrate_random_fp[
-                            substrate_smiles_list.index(row["BB SMILES"])
-                        ].flatten(),
-                        reagent_random_desc[
-                            2 * catalysts.index(row["Catalyst"])
-                            + bases.index(row["Base"])
-                        ].flatten(),
+                if row["BB SMILES"] in substrate_smiles_list :
+                    X[row_count] = np.concatenate(
+                        (
+                            substrate_random_fp[
+                                substrate_smiles_list.index(row["BB SMILES"])
+                            ].flatten(),
+                            reagent_random_desc[
+                                2 * catalysts.index(row["Catalyst"])
+                                + bases.index(row["Base"])
+                            ].flatten(),
+                        )
                     )
-                )
+                    row_count += 1
 
     # Preparing outputs
     if output_type in ["ranking", "multiclass"]:
         y = np.zeros((n_subs, len(bases) * len(catalysts)))
         for i, row in full_dataset.iterrows():
-            y[
-                substrate_smiles_list.index(row["BB SMILES"]),
-                2 * catalysts.index(row["Catalyst"]) + bases.index(row["Base"]),
-            ] = row["Rel. % Conv."]
+            if row["BB SMILES"] in substrate_smiles_list :
+                y[
+                    substrate_smiles_list.index(row["BB SMILES"]),
+                    2 * catalysts.index(row["Catalyst"]) + bases.index(row["Base"]),
+                ] = row["Rel. % Conv."]
         if output_type == "ranking":
             y = yield_to_ranking(y)
         else : 
@@ -241,6 +263,9 @@ def load_data(feature_type, output_type, dataset):
     elif output_type == "yield":
         y = full_dataset["Rel. % Conv."].values.flatten()
         y[np.argwhere(np.isnan(y))] = 0
+        if use_full is False :
+            rows_to_remove = rows_to_remove_dict[dataset[0]]
+            y = np.array([val for i, val in enumerate(y) if int(i//4) not in rows_to_remove])
     return X, y
 
 
@@ -267,9 +292,16 @@ def evaluate_lr_alg(test_rank, pred_rank, n_rxns, perf_dict, comp, model):
 
 
 def lr_eval(feature_type, substrate_type, parser, n_rxns):
-    X, y = load_data(feature_type, "ranking", substrate_type)
+    if parser.use_full :
+        X, y = load_data(feature_type, "ranking", substrate_type)
+    else :
+        print("Parsed appropriately")
+        X, y = load_data(feature_type, "ranking", substrate_type, use_full=False)
     if parser.baseline:
-        _, y_yields = load_data(feature_type, "yield", substrate_type)
+        if parser.use_full : 
+            _, y_yields = load_data(feature_type, "yield", substrate_type)
+        else : 
+            _, y_yields = load_data(feature_type, "yield", substrate_type, use_full=False)
         y_yields = y_yields.reshape(y.shape)
 
     test_fold = np.arange(X.shape[0])  ## LOOCV
@@ -287,13 +319,23 @@ def lr_eval(feature_type, substrate_type, parser, n_rxns):
                     test_rank, pred_rank, n_rxns, PERFORMANCE_DICT, i, "baseline"
                 )
 
-            if parser.rpc or parser.boost_rpc or parser.ibm or parser.ibpl:
+            if parser.rpc or parser.ibm or parser.ibpl:
                 std = StandardScaler()
                 train_X_std = std.fit_transform(X_train)
                 test_X_std = std.transform(X_test)
                 if parser.rpc:
+                    # rpc_lr = RPC(
+                    #     base_learner=LogisticRegression(C=1), cross_validator=None
+                    # )
                     rpc_lr = RPC(
-                        base_learner=LogisticRegression(C=1), cross_validator=None
+                        base_learner=None,
+                        cross_validator = GridSearchCV(
+                            LogisticRegression(solver="liblinear", random_state=42),
+                            param_grid={
+                                "penalty":["l1","l2"],
+                                "C":[0.01,0.03,0.1,0.3,1,3,10]
+                            }
+                        )
                     )
                     rpc_lr.fit(train_X_std, rank_train)
                     rpc_pred_rank = rpc_lr.predict(test_X_std)
@@ -318,6 +360,20 @@ def lr_eval(feature_type, substrate_type, parser, n_rxns):
 
             if parser.lrrf:
                 lrrf = LabelRankingRandomForest(n_estimators=50)
+                # lrrf = LabelRankingRandomForest(
+                #     cross_validator=GridSearchCV(
+                #         estimator=RandomForestClassifier(
+                #             random_state=42,
+                #             criterion="log_loss",
+                #             max_features="log2",
+                #         ),
+                #         param_grid={
+                #             "n_estimators":[25,50,100],
+                #             "max_depth":[3,5,None]
+                #         },
+                #         n_jobs=-1
+                #     )
+                # )
                 lrrf.fit(X_train, rank_train)
                 lrrf_pred_rank = lrrf.predict(X_test)
                 evaluate_lr_alg(
@@ -338,12 +394,14 @@ def lr_eval(feature_type, substrate_type, parser, n_rxns):
 def rfr_eval(
     feature_type,
     substrate_type,
+    use_full,
     n_rxns,
     params={"n_estimators": [30, 100, 200], "max_depth": [5, 10, None]},
-    random_state=42,
+    random_state=42
 ):
-    X, y = load_data(feature_type, "yield", substrate_type)
-    X_ohe, y_ohe = load_data("onehot", "yield", substrate_type)
+    X, y = load_data(feature_type, "yield", substrate_type, use_full=use_full)
+    X_ohe, y_ohe = load_data("onehot", "yield", substrate_type, use_full=use_full)
+    print(X.shape)
     # assert np.all(y == y_ohe)
     if not np.all(y == y_ohe):
         print(y)
@@ -418,16 +476,19 @@ def mc_eval(feature_type, substrate_type, parser, n_rxns=1, random_state=42) :
                 new_pred_proba.append(pred_proba[0][list(model.classes_).index(i)])
         return np.array(new_pred_proba)
 
-    def mc_eval(y_rank_test, pred_proba, n_rxns, comp, model_name):
+    def mc_eval(y_rank_test, pred_proba, pred_val, n_rxns, comp, model_name):
         kt = kendalltau(y_rank_test, pred_proba).statistic
         mrr = np.mean(
             np.reciprocal(y_rank_test[np.argsort(pred_proba)[::-1][:n_rxns]], dtype=np.float32)
         )
-        rr = 1 / np.min(y_rank_test[gcv.predict(X_test_std)])
+        rr = 1 / np.min(y_rank_test[pred_val])
+        print(f"Test compound {comp}")
+        print(f"    kendall-tau={kt} // reciprocal_rank={rr} // mrr={mrr}")
+        print()
         update_perf_dict(PERFORMANCE_DICT, kt, rr, mrr, comp, model_name)
 
-    X, y = load_data(feature_type, "multiclass", substrate_type)
-    _, y_rank = load_data(feature_type, "ranking", substrate_type)
+    X, y = load_data(feature_type, "multiclass", substrate_type, use_full=parser.use_full)
+    _, y_rank = load_data(feature_type, "ranking", substrate_type, use_full=parser.use_full)
     test_fold = np.arange(X.shape[0])  ## LOOCV
     ps = PredefinedSplit(test_fold)
     for i, (train_ind, test_ind) in enumerate(ps.split()):
@@ -456,7 +517,7 @@ def mc_eval(feature_type, substrate_type, parser, n_rxns=1, random_state=42) :
                 pred_proba = gcv.predict_proba(X_test_std)
                 if len(pred_proba[0]) < 4 :
                     pred_proba = get_full_class_proba(pred_proba, gcv)
-                mc_eval(y_rank_test, pred_proba, n_rxns, i, "MCLR")
+                mc_eval(y_rank_test, pred_proba, gcv.predict(X_test_std), n_rxns, i, "MCLR")
 
             if parser.mcsvm:
                 gcv = GridSearchCV(
@@ -478,7 +539,7 @@ def mc_eval(feature_type, substrate_type, parser, n_rxns=1, random_state=42) :
                 pred_proba = gcv.predict_proba(X_test_std)
                 if len(pred_proba[0]) < 4 :
                     pred_proba = get_full_class_proba(pred_proba, gcv)
-                mc_eval(y_rank_test, pred_proba, n_rxns, i, "MCSVM")
+                mc_eval(y_rank_test, pred_proba, gcv.predict(X_test_std), n_rxns, i, "MCSVM")
 
         if parser.mcrfc :
             gcv = GridSearchCV(
@@ -495,14 +556,13 @@ def mc_eval(feature_type, substrate_type, parser, n_rxns=1, random_state=42) :
             pred_proba = gcv.predict_proba(X_test)
             if len(pred_proba[0]) < 4 :
                 pred_proba = get_full_class_proba(pred_proba, gcv)
-            mc_eval(y_rank_test, pred_proba, n_rxns, i, "MCRFC")
+            mc_eval(y_rank_test, pred_proba, gcv.predict(X_test), n_rxns, i, "MCRFC")
 
 
 if __name__ == "__main__":
     parser = parse_args()
     feature = parser.adversarial
     subs_type = parser.subs_type
-
     if (
         parser.lrrf
         or parser.rpc
@@ -514,7 +574,7 @@ if __name__ == "__main__":
         lr_eval(feature, subs_type, parser, n_rxns=1)
 
     if parser.rfr:
-        rfr_eval(feature, subs_type, 1)
+        rfr_eval(feature, subs_type, parser.use_full, 1)
 
     if (
         parser.mcrfc
@@ -527,7 +587,7 @@ if __name__ == "__main__":
     if parser.save:
         joblib.dump(
             PERFORMANCE_DICT,
-            f"performance_excels/natureHTE/{subs_type[0]}_{feature}_multiclass.joblib",
+            f"performance_excels/natureHTE/balanced_{subs_type[0]}_{feature}.joblib",
         )
     else :
         perf_df = pd.DataFrame(PERFORMANCE_DICT)

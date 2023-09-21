@@ -76,6 +76,7 @@ class RPC:
                 else:
                     self.cross_validator.fit(sub_X, sub_preference)
                     model = self.cross_validator.best_estimator_
+                    # print(self.cross_validator.best_params_)
                 self.learner_by_column_pair.update({column_combination: model})
             # If there one label constantly is preferred over the other
             elif len(sub_preference) > 0:
