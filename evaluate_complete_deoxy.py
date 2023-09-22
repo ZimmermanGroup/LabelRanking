@@ -13,6 +13,7 @@ from rdkit.Chem import rdFingerprintGenerator
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
 from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, r2_score
@@ -116,6 +117,21 @@ def parse_args():
         action="store_true",
         help="Include logistic regression that optimizes upon precision@k.",
     )
+    parser.add_argument(
+        "--mcrfc",
+        action="store_true",
+        help="Include Multiclass random forest classifier"
+    ),
+    parser.add_argument(
+        "--mclr",
+        action="store_true",
+        help="Include Multiclass logistic regressor"
+    ),
+    parser.add_argument(
+        "--mcsvm",
+        action="store_true",
+        help="Include Multiclass SVM classifier"
+    ),
     parser.add_argument(
         "--baseline",
         action="store_true",
@@ -539,6 +555,121 @@ def precision_lr_eval(
         )
 
 
+def mc_eval(feature_type, label_component, parser, n_rxns=1, random_state=42) :
+    """ Evaluated multi-class classifiers as a tool to identify highest-yielding reaction.
+    LOOCV is conducted.
+
+    Parameters
+    ----------
+    feature_type : str {'onehot', 'random', 'fp'}
+        Input format.
+    label_component : str {'base', 'sulfonyl_fluoride', 'both'}
+        Type of reagent we want to rank.
+    n_rxns : int
+        Number of reactions that is simulated to be conducted.
+    random_state : int
+        Random seed for modeling.
+    
+    Returns
+    -------
+    None
+    """
+
+    def get_full_class_proba(pred_proba, model):
+        new_pred_proba = []
+        for i in range(4):
+            if i not in gcv.classes_ :
+                new_pred_proba.append(0)
+            else : 
+                new_pred_proba.append(pred_proba[0][list(model.classes_).index(i)])
+        return np.array(new_pred_proba)
+
+    def mc_eval(y_rank_test, pred_proba, pred_val, n_rxns, comp, model_name):
+        kt = [
+            kendalltau(y_rank_test[i, :], yield_to_ranking(pred_proba[i, :])).statistic
+            for i in range(y_rank_test.shape[0])
+        ]
+        rr = [1 / y_rank_test[a, x] for a, x in enumerate(pred_val)]
+        mrr = rr
+        # print(y_rank_test, pred_val, rr)
+        print(f"Test compound {comp}")
+        print(f"    kendall-tau={kt} // reciprocal_rank={rr} // mrr={mrr}")
+        print()
+        update_perf_dict(PERFORMANCE_DICT, kt, rr, mrr, comp, model_name)
+
+    X, y_rank = load_data(feature_type, "ranking", label_component)
+    y = np.argmin(y_rank, axis=1) # Class
+    
+    test_fold = np.repeat(np.arange(32), int(y.shape[0] // 32))
+    ps = PredefinedSplit(test_fold)
+    for i, (train_ind, test_ind) in enumerate(ps.split()):
+        X_train, X_test = X[train_ind, :], X[test_ind, :]
+        y_train, y_test = y[train_ind], y[test_ind]
+        y_rank_test = y_rank[test_ind, :]
+        if parser.mclr or parser.mcsvm :
+            std = StandardScaler()
+            X_train_std = std.fit_transform(X_train)
+            X_test_std = std.transform(X_test)
+            if parser.mclr :
+                gcv = GridSearchCV(
+                    LogisticRegression(
+                        solver="liblinear", # lbfgs doesn't converge
+                        multi_class="auto",
+                        random_state=random_state
+                    ),
+                    param_grid={
+                        "penalty":["l1","l2"], 
+                        "C":[0.1,0.3,1,3,10]
+                    },
+                    scoring="balanced_accuracy",
+                    n_jobs=-1,
+                    cv=4,
+                )  
+                gcv.fit(X_train_std, y_train)
+                pred_proba = gcv.predict_proba(X_test_std)
+                if len(pred_proba[0]) < 4 :
+                    pred_proba = get_full_class_proba(pred_proba, gcv)
+                mc_eval(y_rank_test, pred_proba, gcv.predict(X_test_std), n_rxns, i, "MCLR")
+
+            if parser.mcsvm:
+                gcv = GridSearchCV(
+                    SVC(
+                        degree=2,
+                        decision_function_shape="ovo",
+                        probability=True,
+                        random_state=random_state
+                    ),
+                    param_grid={
+                        "C":[0.1,0.3,1,3,10],
+                        "kernel":["linear","poly","rbf","sigmoid"]
+                    },
+                    scoring="balanced_accuracy",
+                    n_jobs=-1,
+                    cv=4,
+                )
+                gcv.fit(X_train_std, y_train)
+                pred_proba = gcv.predict_proba(X_test_std)
+                if len(pred_proba[0]) < 4 :
+                    pred_proba = get_full_class_proba(pred_proba, gcv)
+                mc_eval(y_rank_test, pred_proba, gcv.predict(X_test_std), n_rxns, i, "MCSVM")
+
+        if parser.mcrfc :
+            gcv = GridSearchCV(
+                RandomForestClassifier(random_state=random_state),
+                param_grid={
+                    "n_estimators":[25,50,100],
+                    "max_depth":[3,5,None]
+                },
+                scoring="balanced_accuracy",
+                n_jobs=-1,
+                cv=4,
+            )
+            gcv.fit(X_train, y_train)
+            pred_proba = gcv.predict_proba(X_test)
+            if len(pred_proba[0]) < 4 :
+                pred_proba = get_full_class_proba(pred_proba, gcv)
+            mc_eval(y_rank_test, pred_proba, gcv.predict(X_test), n_rxns, i, "MCRFC")
+
 if __name__ == "__main__":
     parser = parse_args()
     if len(parser.label_component) == 2:
@@ -573,9 +704,17 @@ if __name__ == "__main__":
         )
         print(PERFORMANCE_DICT)
 
+    # Training a multiclass classifier
+    if (
+        parser.mcrfc
+        or parser.mclr
+        or parser.mcsvm
+    ) :
+        mc_eval(parser.adversarial, label_component, parser, n_rxns)
+
     # Saving the results
     if parser.save:
         joblib.dump(
             PERFORMANCE_DICT,
-            f"performance_excels/deoxy_performance_dict_{label_component}_{parser.adversarial}_precision_nofeature.joblib",
-        )
+            f"performance_excels/deoxy/deoxy_performance_dict_{label_component}_{parser.adversarial}.joblib", 
+        ) #_multiclass
