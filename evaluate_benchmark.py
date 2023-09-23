@@ -83,11 +83,14 @@ if __name__ == "__main__":
         models.append(
             LabelRankingRandomForest(
                 cross_validator=GridSearchCV(
-                    estimator=RandomForestClassifier(random_state=42), 
-                    param_grid={"n_estimators":[10,30,100],
-                                "max_depth":[3,5,None]}
+                    estimator=RandomForestClassifier(random_state=42),
+                    param_grid={
+                        "n_estimators": [10, 30, 100],
+                        "max_depth": [3, 5, None],
+                    },
                 )
-            ))
+            )
+        )
         score_dict.update(
             {
                 "Label Ranking Random Forest": np.zeros(
@@ -156,7 +159,9 @@ if __name__ == "__main__":
             )
 
     for i, row in datasets_info_df.iterrows():
-        dataset = pd.read_excel(f"datasets/{row['name']}_dense.xls", header=None)
+        dataset = pd.read_excel(
+            f"datasets/benchmarks/{row['name']}_dense.xls", header=None
+        )
         X = dataset.iloc[:, : row["num_features"]].to_numpy()
         y = dataset.iloc[:, -1 * row["num_labels"] :].to_numpy()
 
@@ -181,6 +186,6 @@ if __name__ == "__main__":
         data=average_scores, index=model_names, columns=DATASET_INFO["name"]
     )
     if parser.save:
-        score_df.to_excel("performance_excels/Benchmark_scores.xlsx")
+        score_df.to_excel("performance_excels/benchmarks/Benchmark_scores.xlsx")
 
     print(score_df)

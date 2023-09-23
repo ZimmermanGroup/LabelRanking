@@ -22,6 +22,7 @@ performance_dict = {
     "kendall_tau": [],
     "reciprocal_rank": [],
     "mean_reciprocal_rank": [],
+    "regret": [],
     "test_compound": [],
     "model": [],
 }
@@ -134,35 +135,39 @@ def prep_data(feature_type, output_type, test_component):
 
 
 def dist_array_train_test_split(dist_array, test_ind):
-    train_dists = np.vstack(tuple([row for ind, row in enumerate(dist_array) if ind!=test_ind]))
-    train_dists = train_dists[:, [x for x in range(train_dists.shape[1]) if x!=test_ind]]
-    test_dists = dist_array[test_ind, [x for x in range(dist_array.shape[1]) if x!=test_ind]]
+    train_dists = np.vstack(
+        tuple([row for ind, row in enumerate(dist_array) if ind != test_ind])
+    )
+    train_dists = train_dists[
+        :, [x for x in range(train_dists.shape[1]) if x != test_ind]
+    ]
+    test_dists = dist_array[
+        test_ind, [x for x in range(dist_array.shape[1]) if x != test_ind]
+    ]
     return train_dists, test_dists
 
 
-def update_perf_dict(perf_dict, kt, rr, mrr, comp, model):
+def update_perf_dict(perf_dict, kt, rr, mrr, regret, comp, model):
     perf_dict["kendall_tau"].append(kt)
     perf_dict["reciprocal_rank"].append(rr)
     perf_dict["mean_reciprocal_rank"].append(mrr)
+    perf_dict["regret"].append(regret)
     perf_dict["test_compound"].append(comp)
     perf_dict["model"].append(model)
 
 
-def evaluate_lr_alg(test_rank, pred_rank, n_rxns, perf_dict, comp, model):
+def evaluate_lr_alg(test_yield, test_rank, pred_rank, n_rxns, perf_dict, comp, model):
     kt = kendalltau(test_rank, pred_rank).statistic
     predicted_highest_yield_inds = np.argpartition(pred_rank.flatten(), n_rxns)[:n_rxns]
-    rr = 1 / np.min(test_rank[predicted_highest_yield_inds])
+    best_retrieved_yield = np.max(test_yield[predicted_highest_yield_inds])
+    actual_inds_with_that_yield = np.where(test_yield == best_retrieved_yield)[0]
+    rr = 1 / np.min(test_rank[actual_inds_with_that_yield])
+    # rr = 1 / np.min(test_rank[predicted_highest_yield_inds])
     mrr = np.mean(
         np.reciprocal(test_rank[predicted_highest_yield_inds], dtype=np.float32)
     )
-    update_perf_dict(perf_dict, kt, rr, mrr, comp, model)
-    # with open("performance_excels/informer_predictions.txt", "a") as f:
-    #     f.write(f"============={model} predicting {comp}=============\n")
-    #     f.write(f"Actual: {test_rank}\n")
-    #     f.write(f"Predicted: {pred_rank}\n")
-    #     f.write(str(rr) + "\n")
-    #     f.write("\n")
-    #     f.write("\n")
+    regret = max(test_yield) - max(test_yield[predicted_highest_yield_inds])
+    update_perf_dict(perf_dict, kt, rr, mrr, regret, comp, model)
 
 
 if __name__ == "__main__":
@@ -204,22 +209,18 @@ if __name__ == "__main__":
             :, [x for x in range(cfp_array.shape[1]) if x not in cols_to_remove]
         ]
 
-    # Preparing distance metrics for nearest neighbor-based models
-        if (
-            parser.ibm 
-            or parser.ibpl
-            or parser.mlknn
-        ) :
+        # Preparing distance metrics for nearest neighbor-based models
+        if parser.ibm or parser.ibpl or parser.mlknn:
             cfp_nonnp = [
-                mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x))
-                for x in smiles_list
+                mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in smiles_list
             ]
             dists = np.zeros((len(cfp_nonnp), len(cfp_nonnp)))
-            for i in range(1, len(cfp_nonnp)) :        
-                similarities = DataStructs.BulkTanimotoSimilarity(cfp_nonnp[i], cfp_nonnp[:i])
-                dists[i, :i] = np.array([1-x for x in similarities])
+            for i in range(1, len(cfp_nonnp)):
+                similarities = DataStructs.BulkTanimotoSimilarity(
+                    cfp_nonnp[i], cfp_nonnp[:i]
+                )
+                dists[i, :i] = np.array([1 - x for x in similarities])
             dists += dists.T
-        
 
     # Initializing performance logging
     if "amine_ratio" in parser.test_component:
@@ -261,7 +262,8 @@ if __name__ == "__main__":
             ]
         for i in range(yield_array.shape[1]):  # For each compound as test
             for j, indiv_yield_array in enumerate(yield_array_list):
-                test_rank = yield_to_ranking(indiv_yield_array[i, :])
+                test_yield = indiv_yield_array[i, :]
+                test_rank = yield_to_ranking(test_yield)
                 train_row_inds = [
                     x for x in range(indiv_yield_array.shape[0]) if x != i
                 ]
@@ -271,6 +273,7 @@ if __name__ == "__main__":
                 if parser.baseline:
                     pred_rank = yield_to_ranking(np.mean(y_train, axis=0))
                     evaluate_lr_alg(
+                        test_yield,
                         test_rank,
                         pred_rank,
                         n_rxns,
@@ -290,6 +293,7 @@ if __name__ == "__main__":
                         rpc_lr.fit(train_X_std, rank_train)
                         rpc_pred_rank = rpc_lr.predict(test_X_std)
                         evaluate_lr_alg(
+                            test_yield,
                             test_rank,
                             rpc_pred_rank,
                             n_rxns,
@@ -307,6 +311,7 @@ if __name__ == "__main__":
                         boost_rpc.fit(train_X_std, rank_train)
                         boost_rpc_pred_rank = boost_rpc.predict(test_X_std)
                         evaluate_lr_alg(
+                            test_yield,
                             test_rank,
                             boost_rpc_pred_rank,
                             n_rxns,
@@ -335,6 +340,7 @@ if __name__ == "__main__":
                     lrt.fit(X_train, rank_train)
                     lrt_pred_rank = lrt.predict(cfp_array[i, :].reshape(1, -1))
                     evaluate_lr_alg(
+                        test_yield,
                         test_rank,
                         lrt_pred_rank,
                         n_rxns,
@@ -344,13 +350,15 @@ if __name__ == "__main__":
                     )
 
                 if parser.ibm:
-                    ibm = IBLR_M(n_neighbors=3, metric="euclidean")
+                    # ibm = IBLR_M(n_neighbors=3, metric="euclidean")
                     # ibm.fit(X_train, rank_train)
+                    ibm = IBLR_M(n_neighbors=3, metric="precomputed")
                     train_dists, test_dists = dist_array_train_test_split(dists, i)
                     ibm.fit(train_dists, rank_train)
                     # ibm_pred_rank = ibm.predict(cfp_array[i, :].reshape(1, -1))
-                    ibm_pred_rank = ibm.predict(test_dists.reshape(1,-1))
+                    ibm_pred_rank = ibm.predict(test_dists.reshape(1, -1))
                     evaluate_lr_alg(
+                        test_yield,
                         test_rank,
                         ibm_pred_rank,
                         n_rxns,
@@ -360,13 +368,15 @@ if __name__ == "__main__":
                     )
 
                 if parser.ibpl:
-                    ibpl = IBLR_PL(n_neighbors=3, metric="euclidean")
+                    # ibpl = IBLR_PL(n_neighbors=3, metric="euclidean")
+                    ibpl = IBLR_PL(n_neighbors=3, metric="precomputed")
                     train_dists, test_dists = dist_array_train_test_split(dists, i)
                     # ibpl.fit(X_train, rank_train)
                     # ibpl_pred_rank = ibpl.predict(cfp_array[i, :].reshape(1, -1))
                     ibpl.fit(train_dists, rank_train)
-                    ibpl_pred_rank = ibpl.predict(test_dists.reshape(1,-1))
+                    ibpl_pred_rank = ibpl.predict(test_dists.reshape(1, -1))
                     evaluate_lr_alg(
+                        test_yield,
                         test_rank,
                         ibpl_pred_rank,
                         n_rxns,
@@ -384,6 +394,7 @@ if __name__ == "__main__":
                     boost_lrt.fit(X_train, rank_train)
                     blrt_pred_rank = boost_lrt.predict(cfp_array[i, :].reshape(1, -1))
                     evaluate_lr_alg(
+                        test_yield,
                         test_rank,
                         blrt_pred_rank,
                         n_rxns,
@@ -453,21 +464,19 @@ if __name__ == "__main__":
                 mean_reciprocal_rank = np.mean(
                     np.reciprocal(y_ranking[largest_yield_inds], dtype=np.float32)
                 )
+                regret = max(y_test) - y_test[np.argmax(y_pred)]
 
                 performance_dict_list[a]["kendall_tau"].append(kt)
                 performance_dict_list[a]["reciprocal_rank"].append(reciprocal_rank)
                 performance_dict_list[a]["mean_reciprocal_rank"].append(
                     mean_reciprocal_rank
                 )
+                performance_dict_list[a]["regret"].append(regret)
                 performance_dict_list[a]["test_compound"].append(i)
                 performance_dict_list[a]["model"].append("rfr")
-    
+
     # Training a multilabel classifier
-    if (
-        parser.mlknn
-        or parser.mllr
-        or parser.mlrfc
-    ):
+    if parser.mlknn or parser.mllr or parser.mlrfc:
         yield_array = informer_df.to_numpy()
         if "amine_ratio" in parser.test_component:
             yield_array_list = [
@@ -485,112 +494,135 @@ if __name__ == "__main__":
             ]
         for i in range(yield_array.shape[1]):  # For each compound as test
             for j, indiv_yield_array in enumerate(yield_array_list):
-                pos_label_inds = np.argpartition(-1 * indiv_yield_array, kth=n_rxns, axis=1)[:, :n_rxns]
+                pos_label_inds = np.argpartition(
+                    -1 * indiv_yield_array, kth=n_rxns, axis=1
+                )[:, :n_rxns]
                 train_row_inds = [
                     x for x in range(indiv_yield_array.shape[0]) if x != i
                 ]
                 X_train = cfp_array[train_row_inds, :]
                 labels = np.zeros_like(indiv_yield_array)
-                for k, row in enumerate(pos_label_inds) :
+                for k, row in enumerate(pos_label_inds):
                     labels[k, row] = 1
-                rank_train = labels[train_row_inds, :]
-                test_rank = labels[i, :]
+                train_labels = labels[train_row_inds, :]
                 if parser.mllr:
                     std = StandardScaler()
                     train_X_std = std.fit_transform(X_train)
                     test_X_std = std.transform(cfp_array[i, :].reshape(1, -1))
-                    pred_proba = np.zeros(rank_train.shape[1])
+                    pred_proba = np.zeros(train_labels.shape[1])
                     # Training one logistic regressor per label
-                    for k in range(rank_train.shape[1]) : 
-                        if len(np.unique(rank_train[:,k])) > 1 :
-                            if sum(rank_train[:,k]) >= 3 :
-                                # print(rank_train[:,k])
+                    for k in range(train_labels.shape[1]):
+                        if len(np.unique(train_labels[:, k])) > 1:
+                            if sum(train_labels[:, k]) >= 3:
                                 gcv = GridSearchCV(
                                     LogisticRegression(
-                                        solver="liblinear", # lbfgs doesn't converge
-                                        random_state=42
+                                        solver="liblinear",  # lbfgs doesn't converge
+                                        random_state=42,
                                     ),
                                     param_grid={
-                                        "penalty":["l1","l2"], 
-                                        "C":[0.1,0.3,1,3,10]
+                                        "penalty": ["l1", "l2"],
+                                        "C": [0.1, 0.3, 1, 3, 10],
                                     },
                                     scoring="roc_auc",
                                     n_jobs=-1,
                                     cv=3,
                                 )
-                            else : 
+                            else:
                                 # going with default selection
                                 gcv = LogisticRegression(
-                                        penalty="l1",
-                                        solver="liblinear", # lbfgs doesn't converge
-                                        random_state=42
-                                    )
-                            gcv.fit(train_X_std, rank_train[:,k].flatten())
-                            pred_proba[k] = gcv.predict_proba(test_X_std)[0,1]
-                        else :
+                                    penalty="l1",
+                                    solver="liblinear",  # lbfgs doesn't converge
+                                    random_state=42,
+                                )
+                            gcv.fit(train_X_std, train_labels[:, k].flatten())
+                            pred_proba[k] = gcv.predict_proba(test_X_std)[0, 1]
+                        else:
                             pred_proba[k] = 0
                     evaluate_lr_alg(
-                        yield_to_ranking(indiv_yield_array[i, :]), 
-                        yield_to_ranking(pred_proba), 
+                        indiv_yield_array[i, :],
+                        yield_to_ranking(indiv_yield_array[i, :]),
+                        yield_to_ranking(pred_proba),
                         n_rxns,
                         performance_dict_list[j],
                         i,
                         "MLLR",
                     )
 
-                if parser.mlrfc :
+                if parser.mlrfc:
                     gcv = GridSearchCV(
                         RandomForestClassifier(random_state=42),
                         param_grid={
-                            "n_estimators":[25,50,100],
-                            "max_depth":[2,3,5,None]
+                            "n_estimators": [25, 50, 100],
+                            "max_depth": [2, 3, 5, None],
                         },
                         scoring="f1_samples",
                         n_jobs=-1,
                         cv=4,
                     )
-                    gcv.fit(X_train, rank_train)
+                    gcv.fit(X_train, train_labels)
                     # Need to check if proba and the evaluations are done correctly
-                    proba = np.array([x[0][1] if len(x[0])==2 else 1-x[0][0] for x in gcv.predict_proba(cfp_array[i, :].reshape(1,-1))])
+                    proba = np.array(
+                        [
+                            x[0][1] if len(x[0]) == 2 else 1 - x[0][0]
+                            for x in gcv.predict_proba(cfp_array[i, :].reshape(1, -1))
+                        ]
+                    )
                     evaluate_lr_alg(
-                        yield_to_ranking(indiv_yield_array[i, :]), 
-                        yield_to_ranking(proba), 
+                        indiv_yield_array[i, :],
+                        yield_to_ranking(indiv_yield_array[i, :]),
+                        yield_to_ranking(proba),
                         n_rxns,
                         performance_dict_list[j],
                         i,
                         "MLRFC",
                     )
 
-                if parser.mlknn :
-                    train_dists = np.vstack(tuple([row for ind, row in enumerate(dists) if ind!=i]))
-                    train_dists = train_dists[:, [x for x in range(train_dists.shape[1]) if x!=i]]
-                    test_dists = dists[i, [x for x in range(dists.shape[1]) if x!=i]]
+                if parser.mlknn:
+                    train_dists = np.vstack(
+                        tuple([row for ind, row in enumerate(dists) if ind != i])
+                    )
+                    train_dists = train_dists[
+                        :, [x for x in range(train_dists.shape[1]) if x != i]
+                    ]
+                    test_dists = dists[i, [x for x in range(dists.shape[1]) if x != i]]
 
                     gcv = GridSearchCV(
                         KNeighborsClassifier(metric="precomputed"),
-                        param_grid={"n_neighbors":[2,4,6]},
+                        param_grid={"n_neighbors": [2, 4, 6]},
                         n_jobs=-1,
                         scoring="roc_auc",
-                        cv=4
+                        cv=4,
                     )
-                    gcv.fit(train_dists, rank_train)
-                    proba = np.array([x[0][1] if len(x[0])==2 else x[0][0] for x in gcv.predict_proba(test_dists.reshape(1,-1))])
+                    gcv.fit(train_dists, train_labels)
+                    proba = np.array(
+                        [
+                            x[0][1] if len(x[0]) == 2 else x[0][0]
+                            for x in gcv.predict_proba(test_dists.reshape(1, -1))
+                        ]
+                    )
                     evaluate_lr_alg(
-                        yield_to_ranking(indiv_yield_array[i, :]), 
-                        yield_to_ranking(proba), 
+                        indiv_yield_array[i, :],
+                        yield_to_ranking(indiv_yield_array[i, :]),
+                        yield_to_ranking(proba),
                         n_rxns,
                         performance_dict_list[j],
                         i,
                         "MLkNN",
                     )
 
-
     if parser.save:
         joblib.dump(
             performance_dict_list,
             f"performance_excels/informer/informer_performance_dict_{parser.test_component[0]}_multilabel.joblib",
         )
-    else :
-        for perf_dict in performance_dict_list :
-            print(pd.DataFrame(perf_dict))
+    else:
+        for perf_dict in performance_dict_list:
+            perf_df = pd.DataFrame(perf_dict)
+            for model in perf_df["model"].unique():
+                print(
+                    model,
+                    round(
+                        perf_df[perf_df["model"] == model]["reciprocal_rank"].mean(), 3
+                    ),
+                )
             print()
