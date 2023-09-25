@@ -3,42 +3,7 @@ import pandas as pd
 from copy import deepcopy
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
-
-
-DEOXY_SUBSTRATE_SMILES = [
-    "OCCCCC1=CC=CC=C1",
-    "OC(C)CCC1=CC=CC=C1",
-    "OC(C)(C)CCC1=CC=CC=C1",
-    "OCCCC1=NC(C2=CC=CC=C2)=C(C3=CC=CC=C3)O1",
-    "O=C(C(N(C)C=N1)=C1N2C)N(CCCCC(O)C)C2=O",
-    "O=C(C1=CC=CC=C1)N(C(C2=CC=CC=C2)=O)C3=NC=NC4=C3N=CN4[C@H]5[C@H](OC(C6=CC=CC=C6)=O)[C@H](OC(C7=CC=CC=C7)=O)[C@@H](CO)O5",
-    "ClC1=CC([N+]([O-])=O)=CC=C1/N=N/C2=CC=C(N(CC)CCO)C=C2",
-    "OCC1N(CCCC2=CC=CC=C2)CCCC1",
-    "O[C@@H]1C[C@H](OCC2=CC=CC=C2)C1",
-    "O=C(OC)[C@H]1N(C(OC(C)(C)C)=O)C[C@H](O)C1",
-    "O=C(OC)[C@H]1N(C(OC(C)(C)C)=O)C[C@@H](O)C1",
-    "CC1(C)OC[C@H]([C@@H]2[C@@H](O)[C@@H](OC(C)(C)O3)[C@@H]3O2)O1",
-    "O[C@@H]1CO[C@]2([H])[C@@H](OC(C)=O)CO[C@@]21[H]",
-    "O[C@@H]1CC[C@@H](N2C(C(C=CC=C3)=C3C2=O)=O)CC1",
-    "O[C@H]1CC[C@@H](N2C(C(C=CC=C3)=C3C2=O)=O)CC1",
-    "O[C@]1([H])C[C@H](CC2)N(C(OC(C)(C)C)=O)[C@H]2C1",
-    "OCC(C=C1)=CC=C1C2=CC=CC=C2",
-    "OCC1=CC=C(S(N(CCC)CCC)(=O)=O)C=C1",
-    "ClC(N=C1CCCC)=C(CO)N1CC(C=C2)=CC=C2C3=C(C4=NN=NN4C(C5=CC=CC=C5)(C6=CC=CC=C6)C7=CC=CC=C7)C=CC=C3",
-    "OCN1C(C)=CC(C)=N1",
-    "COC1=C(OCCCC(OC)=O)C=C([N+]([O-])=O)C(C(O)C)=C1",
-    "O[C@@H](C1=CC=CC=C1)[C@H](C)N2CCCC2",
-    "C/C(C)=C/CC/C(C)=C/CC/C(C)=C/CO",
-    "CCCCCCCC(O)C=C",
-    "C/C(C)=C/CCC(O)(C=C)C",
-    "O=C(C1=CC=C(Cl)C=C1)N2C3=CC=C(OC)C=C3C(CCO)=C2C",
-    "CC1=NC=C([N+]([O-])=O)N1CCO",
-    "O[C@@H](C1)CC[C@@]2(C)C1=CC[C@]3([H])[C@]2([H])CC[C@@]4(C)[C@@]3([H])CC=C4C5=CN=CC=C5",
-    "O=C1C(O)CCO1",
-    "O=C1C=C[C@@]2(C)C(CC[C@]([C@@](CC[C@@]3(C(CO)=O)O)([H])[C@]3(C)C4)([H])[C@]2([H])C4=O)=C1",
-    "OC[C@@H](C(OC)=O)NC(C1=CC=CC=C1)(C2=CC=CC=C2)C3=CC=CC=C3",
-    "C[C@@]12CC[C@]3([H])[C@]4(OO2)[C@@](O[C@H](O)[C@H](C)C4CC[C@H]3C)([H])O1",
-]
+from abc import ABC, abstractmethod 
 
 
 def yield_to_ranking(yield_array):
@@ -66,6 +31,26 @@ def yield_to_ranking(yield_array):
         raw_rank = len(yield_array) - np.argsort(np.argsort(yield_array))
         raw_rank[np.where(raw_rank == 0)[0]] = len(raw_rank)
     return raw_rank
+
+
+class Dataset(ABC):
+    """
+    Base class for preparing datasets.
+    
+    Parameters
+    ----------
+    for_regressor : bool
+        Whether the input will be used for training a regressor.
+    n_rxns : int
+        Number of reactions that we simulate to select and conduct.
+    """
+    def __init__(
+        self,
+        for_regressor,
+        n_rxns
+    ) :
+        self.for_regressor = for_regressor
+        self.n_rxns = n_rxns
 
 
 class DeoxyDataset :
@@ -100,7 +85,10 @@ class DeoxyDataset :
         self.train_together = train_together
         self.n_rxns = n_rxns
 
-        self.substrate_smiles = DEOXY_SUBSTRATE_SMILES
+        self.substrate_smiles = list(pd.read_excel(
+            "datasets/deoxyfluorination/substrate_smiles.xlsx",
+            header=None
+        ))
         self.descriptors = pd.read_csv(
             "datasets/deoxyfluorination/descriptor_table.csv"
         ).to_numpy()
@@ -112,8 +100,33 @@ class DeoxyDataset :
             .to_numpy()
             .flatten()
         )
+        if self.component_to_rank == "sulfonyl_fluoride" :
+            self.n_non_rank_component = 4 # 4 bases
+        elif self.component_to_rank == "base":
+            self.n_non_rank_component = 5 # 5 sulfonyl fluorides
     
     def _combine_desc_arrays(self, substrate_array, reagent_array, n_base_bits=1):
+        """
+        Combines feature arrays of a substrate and a reagent that first alters through
+        the reagent, followed by substrate.
+        e.g. if there are two reagents:
+          row1=(substrate1 + reagent1) // row2=(substrate1 + reagent2)
+          row3=(substrate2 + reagent1) // row4=(substrate2 + reagent2)
+        
+        Parameters
+        ---------
+        substrate_array : np.ndarray of shape (n_substrates, n_features)
+            Feature array of substrates
+        reagent_array : np.ndarray of shape (n_reagents, n_features)
+            Feature array of reagents
+        n_base_bits : int
+            Number of descriptor elements that bases take.
+        
+        Returns
+        -------
+        combined_array : np.ndarray of shape (n_substrates * n_reagents, n_features_total)
+            Combined feature array.
+        """
         if self.component_to_rank == "sulfonyl_fluoride" :
             combined_array = np.hstack((
                 np.repeat(substrate_array, 4, axis=0),
@@ -176,11 +189,9 @@ class DeoxyDataset :
             elif self.component_to_rank in ["sulfonyl_fluoride", "base"]:
                 if self.train_together :
                     self._X_fp = self._combine_desc_arrays(fp_array, reagent_desc)
-                if not self.train_together :
-                    if self.component_to_rank == "sulfonyl_fluoride" :
-                        self._X_fp = [fp_array]*4
-                    else :
-                        self._X_fp = [fp_array]*5
+                else :
+                    self._X_fp = [fp_array]*self.n_non_rank_component
+                    
         return self._X_fp
     
     
@@ -196,15 +207,15 @@ class DeoxyDataset :
                 self._X_desc = self.descriptors[[20 * x for x in range(32)], :19] #  19=number of substrate descriptors
             elif self.component_to_rank in ["base", "sulfonyl_fluoride"] :
                 if self.train_together :
+                    # This case the features of reaction component that is not ranked are inputs
                     self._X_desc = self._combine_desc_arrays(
                         self.descriptors[[20 * x for x in range(32)], :19],
                         self.descriptors[[20 * x for x in range(32)], 19:]
                     )
                 else :
-                    if self.component_to_rank == "sulfonyl_fluoride" :
-                        self._X_desc = [self.descriptors[[20 * x for x in range(32)], :19]]*4
-                    else :
-                        self._X_desc = [self.descriptors[[20 * x for x in range(32)], :19]]*5
+                    # This case the substrates are the only inputs.
+                    self._X_desc = [self.descriptors[[20 * x for x in range(32)], :19]]*self.n_non_rank_component
+                    
         return self._X_desc
 
     @property
@@ -223,22 +234,41 @@ class DeoxyDataset :
                         4
                     )
                 else :
-                    if self.component_to_rank == "sulfonyl_fluoride" :
-                        self._X_onehot = [self.onehot[[20 * x for x in range(32)], :32]]*4
-                    else :
-                        self._X_onehot = [self.onehot[[20 * x for x in range(32)], :32]]*5
+                    self._X_onehot = [self.onehot[[20 * x for x in range(32)], :32]]*self.n_non_rank_component
+
         return self._X_onehot
     
 
     def _split_yields(self, y_array, n_rows):
+        """ If the yield array is a repetition of yields from reactions of a set of reagents,
+        it splits the array such that each array is yields from only that reagent.
+        
+        Parameters
+        ----------
+        y_array : np.ndarray of shape (n_substrates*n_rxn_component1, n_rxn_component2)
+            Yield array of reactions where rows are repeated by some reaction component.    
+            i.e. row1 = substrate 1 & reagent A, row2 = substrate 1 & reagent B, 
+                 row3 = substrate 2 & reagent A, row4 = substrate 2 & reagent B
+                 •••
+                 with each row having lengths of number of reaction component 2
+        n_rows : int
+            Number of different reagents used for reaction component 1 as in the description above.
+            
+        Returns
+        -------
+        y_by_reagent : list of n_rxn_component1 number of np.ndarray of shape (n_substrates, n_rxn_component2)
+            Yield arrays for each reaction component1.
+        """
         y_by_reagent = [[]] * n_rows
         for ind, row in enumerate(y_array) :
             where = ind % n_rows
             y_by_reagent[where].append(row)
+        y_by_reagent = [np.vstack(tuple(x)) for x in y_by_reagent]
         return y_by_reagent
 
     @property
     def y_yield(self):
+        """ Prepares continuous yield value arrays appropriate for each problem setting. """
         if self.for_regressor : 
             self._y_yield = deepcopy(self.yields)
         else :
@@ -248,34 +278,41 @@ class DeoxyDataset :
                 if self.train_together :
                     self._y_yield = self.yields.reshape(32 * 4, 5)
                 else :
-                    yield_by_reagent = self._split_yields(self.yields.reshape(32 * 4, 5), 4)
-                    self._y_yield = [np.vstack(tuple(x)) for x in yield_by_reagent]
+                    self._y_yield = self._split_yields(self.yields.reshape(32 * 4, 5), 4)
             elif self.component_to_rank == "base":
                 yield_together = np.vstack(tuple([row.reshape(4,5).T for row in self.yields.reshape(32,20)]))
                 if self.train_together :
                     self._y_yield = deepcopy(yield_together)
                 else : 
-                    yield_by_reagent = self._split_yields(yield_together, 5)
-                    self._y_yield = [np.vstack(tuple(x)) for x in yield_by_reagent]
+                    self._y_yield = self._split_yields(yield_together, 5)
 
         return self._y_yield
 
     @property
     def y_ranking(self):
+        """ Transforms raw continuous yield values into arrays of ranks. """
         if type(self._y_yield) == list :
             self._y_ranking = [yield_to_ranking(x) for x in self._y_yield]
         else :
             self._y_ranking = yield_to_ranking(self._y_yield)
-        # if self.component_to_rank == "both":
-        #     self._y_ranking = yield_to_ranking(self.yields.reshape(32, 20))
-        # elif self.component_to_rank == "sulfony_fluoride" :
-        #     self._y_ranking = yield_to_ranking(self.yields.reshape(32 * 4, 5))
-        # elif self.component_to_rank == "base":
-        #     self._y_ranking = yield_to_ranking(self.yields.reshape(32 * 5, 4))
         return self._y_ranking
     
 
-    def _transform_to_multilabel(self, yield_array) :
+    def _transform_yield_to_multilabel(self, yield_array) :
+        """
+        For each substrate (pair), the array of yields under multiple reaction conditions
+        are transformed into a multilabel array, marking top-k reaction conditions as positives.
+        
+        Parameters
+        ----------
+        yield_array : np.ndarray of shape (n_substrates, n_reaction_conditions)
+            Array of continuous yield values.
+        
+        Returns
+        -------
+        multilabel_array : np.ndarray of shape (n_substrates, n_reaction_conditions)
+            Array to be used for multilabel classification.
+        """
         positive_inds = list(np.argpartition(-1*yield_array, self.n_rxns, axis=1)[:self.n_rxns])
         multilabel_array = np.zeros_like(yield_array)
         for i, row in enumerate(yield_array):
@@ -287,12 +324,14 @@ class DeoxyDataset :
     def y_label(self):
         """ 
         Prepares output array to be used for conventional classifications.
+        If we will select one highest prediction, we formulate a multiclass classification.
+        If we select more than one, a multilabel classification is formulated.
         """
         if self.n_rxns > 1:
             if self.train_together :
-                self._y_label = self._transform_to_multilabel(self._y_yield)
+                self._y_label = self._transform_yield_to_multilabel(self._y_yield)
             else : 
-                self._y_label = [self._transform_to_multilabel(x) for x in self._y_yield]
+                self._y_label = [self._transform_yield_to_multilabel(x) for x in self._y_yield]
         elif self.n_rxns == 1 :
             if type(self._y_yield) == list:
                 self._y_label = [np.argmin(x, axis=1) for x in np.argmin(self._y_yield, axis=1)]
