@@ -98,11 +98,19 @@ def run_deoxy(parser):
             n_other_component = 4
         elif label_component == "base":
             n_other_component = 5
+    # Listing Label Ranking algorithms
+    lr_algorithms = []
+    if parser.rpc : lr_algorithms.append("RPC")
+    if parser.lrt : lr_algorithms.append("LRT")
+    if parser.lrrf : lr_algorithms.append("LRRF")
+    if parser.ibm : lr_algorithms.append("IBM")
+    if parser.ibpl : lr_algorithms.append("IBPL")
 
     # Evaluations
     perf_dicts = []
     if parser.rfr:
         if parser.train_together or label_component == "both":
+            print("Training together or ranking all conditions")
             inner_ps = PredefinedSplit(np.repeat(np.arange(31), 20))
             outer_ps = PredefinedSplit(np.repeat(np.arange(32), 20))
         elif label_component == "base" and not parser.train_together:
@@ -134,7 +142,10 @@ def run_deoxy(parser):
         ).train_and_evaluate_models()
         perf_dicts.append(evaluator.perf_dict)
 
-    elif parser.baseline:
+    if (
+        parser.baseline
+        or len(lr_algorithms) > 0
+    )    :
         dataset = DeoxyDataset(False, label_component, parser.train_together, n_rxns)
         if parser.train_together:
             if label_component != "both":
@@ -143,8 +154,18 @@ def run_deoxy(parser):
                 ps = PredefinedSplit(np.arange(32))
         else:
             ps = [PredefinedSplit(np.arange(32))] * n_other_component
-        evaluator = BaselineEvaluator(dataset, n_rxns, ps).train_and_evaluate_models()
-        perf_dicts.append(evaluator.perf_dict)
+        if parser.baseline : 
+            baseline_evaluator = BaselineEvaluator(dataset, n_rxns, ps).train_and_evaluate_models()
+            perf_dicts.append(baseline_evaluator.perf_dict)
+        if len(lr_algorithms) > 0 :
+            label_ranking_evaluator = LabelRankingEvaluator(
+                dataset, 
+                parser.feature,
+                n_rxns, 
+                lr_algorithms,
+                ps, 
+            ).train_and_evaluate_models()
+            perf_dicts.append(label_ranking_evaluator.perf_dict)
 
     return perf_dicts
 

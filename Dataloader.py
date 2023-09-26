@@ -341,10 +341,10 @@ class DeoxyDataset:
     @property
     def y_ranking(self):
         """Transforms raw continuous yield values into arrays of ranks."""
-        if type(self._y_yield) == list:
-            self._y_ranking = [yield_to_ranking(x) for x in self._y_yield]
+        if type(self.y_yield) == list:
+            self._y_ranking = [yield_to_ranking(x) for x in self.y_yield]
         else:
-            self._y_ranking = yield_to_ranking(self._y_yield)
+            self._y_ranking = yield_to_ranking(self.y_yield)
         return self._y_ranking
 
     def _transform_yield_to_multilabel(self, yield_array):
