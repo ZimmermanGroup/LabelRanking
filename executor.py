@@ -10,7 +10,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Specify the evaluation to run.")
     parser.add_argument(
         "--dataset",
-        help="Which dataset to use. Should be either 'deoxy', 'natureHTE', 'informer'."
+        help="Which dataset to use. Should be either 'deoxy', 'natureHTE', 'informer'.",
     )
     parser.add_argument(
         "--feature",
@@ -57,12 +57,8 @@ def parse_args():
         action="store_true",
         help="Include random forest classifier",
     ),
-    parser.add_argument(
-        "--lr", action="store_true", help="Include logistic regressor"
-    ),
-    parser.add_argument(
-        "--knn", action="store_true", help="Include kNN classifier"
-    ),
+    parser.add_argument("--lr", action="store_true", help="Include logistic regressor"),
+    parser.add_argument("--knn", action="store_true", help="Include kNN classifier"),
     parser.add_argument(
         "--baseline",
         action="store_true",
@@ -78,56 +74,152 @@ def parse_args():
     return args
 
 
-def main():
-    pass
+def run_deoxy(parser):
+    """Runs model evaluations on the deoxyfluorination dataset as defined by the parser.
 
+    Parameters
+    ----------
+    parser: argparse object.
 
-if __name__ == "__main__" :
-    parser = parse_args()
-    if parser.dataset == "deoxy":
-        if len(parser.label_component) == 2 :
-            n_rxns = 4
-            label_component = "both"
-        else :
-            n_rxns = 1
-            label_component = parser.label_component[0]
-        print(parser.train_together)
-        data_reg = DeoxyDataset(True, label_component, parser.train_together, n_rxns)
-        data = DeoxyDataset(False, label_component, parser.train_together, n_rxns)
+    Returns
+    -------
+    perf_dicts : dict
+        key : model type
+        val : list of (or a single) performance dictionaries
+    """
+    # Initialization
+    if len(parser.label_component) == 2:
+        n_rxns = 4
+        label_component = "both"
+    else:
+        n_rxns = 1
+        label_component = parser.label_component[0]
+        if label_component == "sulfonyl_fluoride":
+            n_other_component = 4
+        elif label_component == "base":
+            n_other_component = 5
 
-        # rfr = RegressorEvaluator(
-        #     data_reg,
-        #     parser.feature,
-        #     n_rxns,
-        #     [GridSearchCV(
-        #         RandomForestRegressor(random_state=42),
-        #         param_grid={"n_estimators": [30, 100, 200], "max_depth": [5, 10, None]},
-        #         scoring="r2",
-        #         n_jobs=-1,
-        #         cv=PredefinedSplit(np.repeat(np.arange(31), 20)),
-        #     )],
-        #     ["RFR"],
-        #     PredefinedSplit(np.repeat(np.arange(32), 20))
-        # ).train_and_evaluate_models()
-        rfr = BaselineEvaluator(
-            data,
+    # Evaluations
+    perf_dicts = []
+    if parser.rfr:
+        if parser.train_together or label_component == "both":
+            inner_ps = PredefinedSplit(np.repeat(np.arange(31), 20))
+            outer_ps = PredefinedSplit(np.repeat(np.arange(32), 20))
+        elif label_component == "base" and not parser.train_together:
+            print("Not training together, ranking bases")
+            inner_ps = PredefinedSplit(np.repeat(np.arange(31), 4))
+            outer_ps = [PredefinedSplit(np.repeat(np.arange(32), 4))] * 5
+        elif label_component == "sulfonyl_fluoride" and not parser.train_together:
+            inner_ps = PredefinedSplit(np.repeat(np.arange(31), 5))
+            outer_ps = [PredefinedSplit(np.repeat(np.arange(32), 5))] * 4
+
+        evaluator = RegressorEvaluator(
+            DeoxyDataset(True, label_component, parser.train_together, n_rxns),
+            parser.feature,
             n_rxns,
-            PredefinedSplit(np.repeat(np.arange(32), int(data.y_yield.shape[0] // 32)))
-        )
-        rfr.train_and_evaluate_models()
-        print(rfr.perf_dict)
-        perf_df = pd.DataFrame(rfr.perf_dict)
-        # for model in perf_df["model"].unique():
-            # print(
-            #     model,
-            #     round(
-            #         perf_df[perf_df["model"] == model]["reciprocal_rank"].mean(), 3
-            #     ),
-            # )
-        perf_df_by_sf = [perf_df.iloc[[x for x in range(perf_df.shape[0]) if x%5==i], :] for i in range(5)]
-        for i in range(5):
-            print(f"Sulfonyl fluoride {i+1}")
-            sub_df = perf_df_by_sf[i]
-            print(round(sub_df["reciprocal_rank"].mean(), 3))
-            print()
-        print()
+            [
+                GridSearchCV(
+                    RandomForestRegressor(random_state=42),
+                    param_grid={
+                        "n_estimators": [30, 100, 200],
+                        "max_depth": [5, 10, None],
+                    },
+                    scoring="r2",
+                    n_jobs=-1,
+                    cv=inner_ps,
+                )
+            ],
+            ["RFR"],
+            outer_ps,
+        ).train_and_evaluate_models()
+        perf_dicts.append(evaluator.perf_dict)
+
+    elif parser.baseline:
+        dataset = DeoxyDataset(False, label_component, parser.train_together, n_rxns)
+        if parser.train_together:
+            if label_component != "both":
+                ps = PredefinedSplit(np.repeat(np.arange(32), n_other_component))
+            else:
+                ps = PredefinedSplit(np.arange(32))
+        else:
+            ps = [PredefinedSplit(np.arange(32))] * n_other_component
+        evaluator = BaselineEvaluator(dataset, n_rxns, ps).train_and_evaluate_models()
+        perf_dicts.append(evaluator.perf_dict)
+
+    return perf_dicts
+
+
+def parse_perf_dicts(save, perf_dicts):
+    """
+    Process the performance dicts.
+
+    Parameters
+    ----------
+    save : bool
+        Whether the processed performance log should be saved.
+        if True : saves an excel file
+        if False : prints out average scores
+    perf_dicts : list of dictionaries or list of lists of dictionaries
+
+    Returns
+    -------
+    None
+    """
+    if type(perf_dicts[0]) == list:
+        full_perf_dict = []
+        for i in range(len(perf_dicts[0])):
+            sub_perf_dict = pd.concat([pd.DataFrame(x[i]) for x in perf_dicts])
+            full_perf_dict.append(sub_perf_dict)
+        if not save:
+            for perf_df in full_perf_dict:
+                for model in perf_df["model"].unique():
+                    print(
+                        model,
+                        round(
+                            perf_df[perf_df["model"] == model][
+                                "reciprocal_rank"
+                            ].mean(),
+                            3,
+                        ),
+                        round(
+                            perf_df[perf_df["model"] == model]["kendall_tau"].mean(), 3
+                        ),
+                        round(perf_df[perf_df["model"] == model]["regret"].mean(), 3),
+                    )
+
+    elif type(perf_dicts[0]) == dict:
+        full_perf_dict = pd.concat([pd.DataFrame(x) for x in perf_dicts])
+        if not save:
+            for model in full_perf_dict["model"].unique():
+                print(
+                    model,
+                    round(
+                        full_perf_dict[full_perf_dict["model"] == model][
+                            "reciprocal_rank"
+                        ].mean(),
+                        3,
+                    ),
+                    round(
+                        full_perf_dict[full_perf_dict["model"] == model][
+                            "kendall_tau"
+                        ].mean(),
+                        3,
+                    ),
+                    round(
+                        full_perf_dict[full_perf_dict["model"] == model][
+                            "regret"
+                        ].mean(),
+                        3,
+                    ),
+                )
+
+
+def main(parser):
+    if parser.dataset == "deoxy":
+        perf_dicts = run_deoxy(parser)
+    parse_perf_dicts(parser.save, perf_dicts)
+
+
+if __name__ == "__main__":
+    parser = parse_args()
+    main(parser)
