@@ -1,6 +1,7 @@
 from copy import deepcopy
 from scipy.stats import kendalltau
 import numpy as np
+import Dataloader
 from Dataloader import yield_to_ranking
 from abc import ABC, abstractmethod
 from label_ranking import *
@@ -17,7 +18,6 @@ PERFORMANCE_DICT = {
     "test_compound": [],
     "model": [],
 }
-
 
 class Evaluator(ABC):
     """Base class for evaluators for various types of algorithsm.
@@ -296,7 +296,7 @@ class MulticlassEvaluator(Evaluator):
     outer_cv : sklearn split object
         Cross-validation scheme to 'evaluate' the algorithms.
 
-    Attributes
+    Attributes 
     ----------
 
     """
@@ -588,9 +588,6 @@ class RegressorEvaluator(Evaluator):
             self.perf_dict = []
             for i, (array, cv) in enumerate(zip(y, self.outer_cv)):
                 perf_dict = deepcopy(PERFORMANCE_DICT)
-                print("X array shape:", X.shape)
-                print("ARRAY SHAPE:", array.shape)
-                print(cv)
                 for j, (train_ind, test_ind) in enumerate(cv.split()):
                     X_train, X_test = X[train_ind, :], X[test_ind]
                     y_train, y_test = array[train_ind], array[test_ind]
@@ -623,19 +620,42 @@ class RegressorEvaluator(Evaluator):
                     model.fit(X_train, y_train)
                     self.models[k].append(model.best_estimator_)
                     self.cv_scores[k].append(model.best_score_)
-                    if self.dataset.component_to_rank == "base":
-                        y_test_reshape = y_test.reshape(4, 5).T
-                        pred_rank_reshape = yield_to_ranking(
-                            model.predict(X_test).reshape(4, 5).T
-                        )
-                    elif self.dataset.component_to_rank == "sulfonyl_fluoride":
-                        y_test_reshape = y_test.reshape(4, 5)
-                        pred_rank_reshape = yield_to_ranking(
-                            model.predict(X_test).reshape(4, 5)
-                        )
-                    elif self.dataset.component_to_rank == "both":
-                        y_test_reshape = y_test
-                        pred_rank_reshape = yield_to_ranking(model.predict(X_test))
+                    if type(self.dataset) == Dataloader.DeoxyDataset :
+                        if self.dataset.component_to_rank == "base":
+                            y_test_reshape = y_test.reshape(4, 5).T
+                            pred_rank_reshape = yield_to_ranking(
+                                model.predict(X_test).reshape(4, 5).T
+                            )
+                        elif self.dataset.component_to_rank == "sulfonyl_fluoride":
+                            y_test_reshape = y_test.reshape(4, 5)
+                            pred_rank_reshape = yield_to_ranking(
+                                model.predict(X_test).reshape(4, 5)
+                            )
+                        elif self.dataset.component_to_rank == "both":
+                            y_test_reshape = y_test
+                            pred_rank_reshape = yield_to_ranking(model.predict(X_test))
+                    elif type(self.dataset) == Dataloader.InformerDataset :
+                        assert len(y_test) == 40
+                        if self.dataset.component_to_rank == "amine_ratio" :
+                            y_test_reshape = y_test.reshape(10,4).T
+                            pred_rank_reshape = yield_to_ranking(model.predict(X_test).reshape(10,4).T)
+                        elif self.dataset.component_to_rank == "catalyst_ratio" :
+                            intermediate_array = y_test.reshape(10,4).T
+                            even_rows = [row.reshape(1,-1) for i, row in enumerate(intermediate_array) if i%2==0]
+                            odds_rows = [row.reshape(1,-1) for i, row in enumerate(intermediate_array) if i%2==1]
+                            y_test_reshape = np.vstack((
+                                np.hstack(tuple(even_rows)),
+                                np.hstack(tuple(odds_rows)),
+                            ))
+                            pred_yields = model.predict(X_test).reshape(10,4).T
+                            even_rows = [row.reshape(1,-1) for i, row in enumerate(pred_yields) if i%2==0]
+                            odds_rows = [row.reshape(1,-1) for i, row in enumerate(pred_yields) if i%2==1]
+                            pred_rank_reshape = yield_to_ranking(np.vstack((
+                                np.hstack(tuple(even_rows)),
+                                np.hstack(tuple(odds_rows)),
+                            )))
+
+
                     self._evaluate_alg(
                         self.perf_dict,
                         y_test_reshape,

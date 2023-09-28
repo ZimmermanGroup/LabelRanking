@@ -1,4 +1,5 @@
 import argparse
+from abc import  ABC
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
 
@@ -74,6 +75,83 @@ def parse_args():
     return args
 
 
+def parse_algorithms(parser):
+    # Listing Label Ranking algorithms
+    lr_algorithms = []
+    if parser.rpc : lr_algorithms.append("RPC")
+    if parser.lrt : lr_algorithms.append("LRT")
+    if parser.lrrf : lr_algorithms.append("LRRF")
+    if parser.ibm : lr_algorithms.append("IBM")
+    if parser.ibpl : lr_algorithms.append("IBPL")
+    # Listing Conventional Classifiers
+    classifiers = []
+    if parser.rfc : classifiers.append("RFC")
+    if parser.lr : classifiers.append("LR")
+    if parser.knn : classifiers.append("KNN")
+    return lr_algorithms, classifiers
+
+
+def run_informer(parser):
+    """ Runs model evaluations on the informer dataset as defined by the parser.
+    
+    Parameters
+    ----------
+    parser: argparse object.
+    
+    Returns
+    -------
+    perf_dicts : dict
+        key : model type
+        val : list of (or a single) performance dictionaries
+    """
+    # Initialization
+    label_component = parser.label_component[0]
+    if label_component == "amine_ratio":
+        n_rxns = 2
+        n_other_component = 4
+    elif label_component == "catalyst_ratio":
+        n_rxns = 4
+        n_other_component = 2 # may need to multiply by 5
+
+    lr_algorithms, classifiers = parse_algorithms(parser)
+    # Evaluations
+    perf_dicts = []
+    if parser.rfr:
+        if parser.train_together :
+            outer_ps = PredefinedSplit(np.repeat(np.arange(11), 40))
+            inner_ps = PredefinedSplit(np.repeat(np.arange(10), 40))
+
+        elif label_component == "amine_ratio":
+            outer_ps = [PredefinedSplit(np.repeat(np.arange(11), 10))] * 4
+            inner_ps = PredefinedSplit(np.repeat(np.arange(10), 10))
+
+        elif label_component == "catalyst_ratio":
+            outer_ps = [PredefinedSplit(np.repeat(np.arange(11), 20))] * 2
+            inner_ps = PredefinedSplit(np.repeat(np.arange(10), 20))
+
+        print(type(outer_ps))
+        evaluator = RegressorEvaluator(
+            InformerDataset(True, label_component, parser.train_together, n_rxns),
+            parser.feature,
+            n_rxns,
+            [
+                GridSearchCV(
+                    RandomForestRegressor(random_state=42),
+                    param_grid={
+                        "n_estimators": [30, 100, 200],
+                        "max_depth": [5, 10, None],
+                    },
+                    scoring="r2",
+                    n_jobs=-1,
+                    cv=inner_ps,
+                )
+            ],
+            ["RFR"],
+            outer_ps,
+        ).train_and_evaluate_models()
+        perf_dicts.append(evaluator.perf_dict)
+    return perf_dicts
+
 def run_deoxy(parser):
     """Runs model evaluations on the deoxyfluorination dataset as defined by the parser.
 
@@ -98,18 +176,7 @@ def run_deoxy(parser):
             n_other_component = 4
         elif label_component == "base":
             n_other_component = 5
-    # Listing Label Ranking algorithms
-    lr_algorithms = []
-    if parser.rpc : lr_algorithms.append("RPC")
-    if parser.lrt : lr_algorithms.append("LRT")
-    if parser.lrrf : lr_algorithms.append("LRRF")
-    if parser.ibm : lr_algorithms.append("IBM")
-    if parser.ibpl : lr_algorithms.append("IBPL")
-    # Listing Conventional Classifiers
-    classifiers = []
-    if parser.rfc : classifiers.append("RFC")
-    if parser.lr : classifiers.append("LR")
-    if parser.knn : classifiers.append("KNN")
+    lr_algorithms, classifiers = parse_algorithms(parser)
 
     # Evaluations
     perf_dicts = []
@@ -252,6 +319,8 @@ def parse_perf_dicts(save, perf_dicts):
 def main(parser):
     if parser.dataset == "deoxy":
         perf_dicts = run_deoxy(parser)
+    elif parser.dataset == "informer":
+        perf_dicts = run_informer(parser)
     parse_perf_dicts(parser.save, perf_dicts)
 
 

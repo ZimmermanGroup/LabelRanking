@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from copy import deepcopy
-from rdkit import Chem
+from rdkit import Chem, DataStructs
 from rdkit.Chem import rdFingerprintGenerator
 from abc import ABC, abstractmethod
 
@@ -49,6 +49,171 @@ class Dataset(ABC):
         self.for_regressor = for_regressor
         self.n_rxns = n_rxns
 
+
+class InformerDataset(Dataset) :
+    """
+    Prepares arrays from the nickella-photoredox informer for downstream use.
+
+    Parameters
+    ----------
+    for_regressor : bool
+        Whether the input will be used for training a regressor.
+    n_rxns : int
+        Number of reactions that we simulate to select and conduct.
+    train_together : bool
+        Whether the non-label reaction component should be trained altogether, or used as separate datasets.
+        Only considered when component_to_rank is not 'both'.
+    component_to_rank : str {'both', 'amine_ratio', 'catalyst_ratio'}
+        Which reaction component to be ranked.
+    
+    Attributes
+    ----------
+    X_fp : 
+        Only fingerprint arrays are considered for substrates.
+    """
+    def __init__(self, for_regressor, component_to_rank, train_together, n_rxns) :
+        super().__init__(for_regressor, n_rxns)
+        self.component_to_rank = component_to_rank
+        self.train_together = train_together
+
+        # Reading in the raw dataset
+        informer_df = pd.read_excel("datasets/Informer.xlsx").iloc[:40, :]
+        desc_df = pd.read_excel(
+            "datasets/Informer.xlsx", sheet_name="descriptors", usecols=[0, 1, 2, 3, 4]
+        ).iloc[:40, :]
+        smiles = pd.read_excel("datasets/Informer.xlsx", sheet_name="smiles", header=None)
+
+        # Dropping compounds where all yields are below 20%
+        cols_to_erase = []
+        for col in informer_df.columns:
+            if np.all(informer_df.loc[:, col].to_numpy() < 20):
+                cols_to_erase.append(col)
+        informer_df = informer_df.loc[
+            :, [x for x in range(1, 19) if x not in cols_to_erase]
+        ]  # leaves 11 compounds
+        smiles_list = [
+            x[0] for i, x in enumerate(smiles.values.tolist()) if i + 1 not in cols_to_erase
+        ]
+
+        # Assigning the arrays
+        self.df = informer_df
+        self.desc = desc_df.to_numpy()
+        self.smiles_list = smiles_list
+
+
+    def _prep_distance_arrays(self):
+        """ Tanimoto distances between the substrates, used for neighbor based models. """
+        mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
+        cfp_nonnp = [
+            mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in self.smiles_list
+        ]
+        dists = np.zeros((len(cfp_nonnp), len(cfp_nonnp)))
+        for i in range(1, len(cfp_nonnp)):
+            similarities = DataStructs.BulkTanimotoSimilarity(
+                cfp_nonnp[i], cfp_nonnp[:i]
+            )
+            dists[i, :i] = np.array([1 - x for x in similarities])
+        dists += dists.T
+        self.dists_for_neighbors = dists
+        return self
+    
+    def _split_arrays(self, substrate_array_to_process, other_array, return_X=True):
+        if self.for_regressor :
+            arrays = []
+            for i, (_, yield_vals) in enumerate(self.df.items()):
+                if return_X : 
+                    arrays.append(
+                        np.hstack((np.tile(substrate_array_to_process[i, :], (40, 1)), other_array))
+                    )
+                else :
+                    arrays.append(yield_vals.to_numpy())
+            if return_X : 
+                array = np.vstack(tuple(arrays))
+            else :
+                array = np.concatenate(tuple(arrays))
+            if self.train_together:
+                processed_array = array
+            else :
+                if self.component_to_rank == "catalyst_ratio":
+                    processed_array = [
+                        array[[x for x in range(array.shape[0]) if x % 8 < 4]],
+                        array[[x for x in range(array.shape[0]) if x % 8 >= 4]],
+                    ]
+                elif self.component_to_rank == "amine_ratio":
+                    processed_array = [
+                        array[[y for y in range(array.shape[0]) if y % 4 == x]]
+                        for x in range(4)
+                    ]
+                if return_X :
+                    assert np.all(processed_array[0] == processed_array[1])
+                    processed_array = processed_array[0]
+        
+        return processed_array
+
+
+    @property
+    def X_fp(self, fpSize=1024, radius=3):
+        """
+        Prepares fingerprint arrays of substrates.
+        For regressors, other descriptors are appended after the substrate fingerprint.
+
+        Parameters
+        ----------
+        fpSize : int
+            Length of the Morgan FP.
+        radius : int
+            Radius of the Morgan FP.
+
+        Returns
+        -------
+        X_fp : np.ndarray of shape (n_rxns, n_features)
+            n_features depends on self.for_regressor
+        """
+        mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=fpSize)
+        cfp = [
+            mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(x))
+            for x in self.smiles_list
+        ]
+        cfp_array = np.vstack(tuple(cfp))
+        if self.train_together :
+            other_array = self.desc
+        elif self.component_to_rank == "amine_ratio"  :
+            other_array = np.hstack((self.desc[:,:3], self.desc[:,-1].reshape(-1,1)))
+        elif self.component_to_rank == "catalyst_ratio"  :
+            other_array = self.desc[:,:4]
+        self._X_fp = self._split_arrays(cfp_array, other_array)
+        return self._X_fp
+    
+    @property
+    def X_desc(self, fpSize=1024, radius=3):
+        return self.X_fp(fpSize=fpSize, radius=radius)
+    
+    @property
+    def X_onehot(self):
+        "Prepares onehot arrays."  
+        substrate_onehot_array = np.identity(len(self.smiles_list))
+        photocat_onehot_array = np.repeat(np.identity(5), 8, axis=0)
+        cat_ratio_onehot_array = np.tile(np.identity(4), (10, 1))
+        amine_ratio_onehot_array = np.tile(np.repeat(np.identity(2), 4, axis=0), (5, 1))
+        self._X_onehot = self._split_arrays(substrate_onehot_array, np.hstack((photocat_onehot_array, cat_ratio_onehot_array, amine_ratio_onehot_array)))
+        return self._X_onehot
+    
+    @property
+    def y_yield(self):
+        self._y_yield = self._split_arrays(None, None, return_X=False)
+        return self._y_yield
+
+    @property
+    def y_ranking(self):
+        self._y_ranking = yield_to_ranking(self.y_yield())
+        return self._y_ranking
+
+    @property
+    def y_label(self):
+        yields = self.y_yield()
+        nth_highest_yield = np.partition(yields, -1*self.n_rxns, axis=1)[-1*self.n_rxns]
+        labels = np.zeros_like() # assuming for now that it's given in the right shape
+        #TODO
 
 class DeoxyDataset:
     """
