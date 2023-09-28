@@ -95,8 +95,10 @@ class DeoxyDataset:
             .flatten()
         )
         if self.component_to_rank == "sulfonyl_fluoride":
+            self.n_rank_component = 5
             self.n_non_rank_component = 4  # 4 bases
         elif self.component_to_rank == "base":
+            self.n_rank_component = 4
             self.n_non_rank_component = 5  # 5 sulfonyl fluorides
 
     def _combine_desc_arrays(self, substrate_array, reagent_array, n_base_bits=1):

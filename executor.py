@@ -105,6 +105,11 @@ def run_deoxy(parser):
     if parser.lrrf : lr_algorithms.append("LRRF")
     if parser.ibm : lr_algorithms.append("IBM")
     if parser.ibpl : lr_algorithms.append("IBPL")
+    # Listing Conventional Classifiers
+    classifiers = []
+    if parser.rfc : classifiers.append("RFC")
+    if parser.lr : classifiers.append("LR")
+    if parser.knn : classifiers.append("KNN")
 
     # Evaluations
     perf_dicts = []
@@ -145,6 +150,7 @@ def run_deoxy(parser):
     if (
         parser.baseline
         or len(lr_algorithms) > 0
+        or len(classifiers) > 0
     )    :
         dataset = DeoxyDataset(False, label_component, parser.train_together, n_rxns)
         if parser.train_together:
@@ -166,7 +172,15 @@ def run_deoxy(parser):
                 ps, 
             ).train_and_evaluate_models()
             perf_dicts.append(label_ranking_evaluator.perf_dict)
-
+        if len(classifiers) > 0 :
+            if n_rxns == 1 :
+                classifier_evaluator = MulticlassEvaluator(
+                    dataset,
+                    parser.feature,
+                    classifiers,
+                    ps
+                ).train_and_evaluate_models()
+            perf_dicts.append(classifier_evaluator.perf_dict)
     return perf_dicts
 
 

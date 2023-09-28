@@ -5,6 +5,8 @@ from Dataloader import yield_to_ranking
 from abc import ABC, abstractmethod
 from label_ranking import *
 from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GridSearchCV
+from sklearn.neighbors import KNeighborsClassifier
 from sklr.tree import DecisionTreeLabelRanker
 
 PERFORMANCE_DICT = {
@@ -165,6 +167,17 @@ class Evaluator(ABC):
         print(rr)
         self._update_perf_dict(perf_dict, kt, rr, mrr, regret, comp, model)
 
+    def _load_X(self):
+        if self.feature_type == "desc":
+            X = self.dataset.X_desc
+        elif self.feature_type == "fp":
+            X = self.dataset.X_fp
+        elif self.feature_type == "onehot":
+            X = self.dataset.X_onehot
+        elif self.feature_type == "random":
+            X = self.dataset.X_random
+        return X
+
     @abstractmethod
     def train_and_evaluate_models(self):
         pass
@@ -285,9 +298,133 @@ class MulticlassEvaluator(Evaluator):
 
     Attributes
     ----------
-    
-    """
 
+    """
+    def __init__(
+        self,
+        dataset,
+        feature_type,
+        list_of_names,
+        outer_cv,
+        n_rxns=1,
+    ):
+        super().__init__(dataset, n_rxns, outer_cv)
+        self.feature_type = feature_type
+        self.list_of_names = list_of_names
+
+        self.list_of_algorithms = []
+        for name in self.list_of_names :
+            if name == "RFC":
+                self.list_of_algorithms.append(
+                    GridSearchCV(
+                        RandomForestClassifier(random_state=42),
+                        param_grid={"n_estimators": [25, 50, 100], "max_depth": [3, 5, None]},
+                        scoring="balanced_accuracy",
+                        n_jobs=-1,
+                        cv=4,
+                    )
+                )
+            elif name == "LR" :
+                self.list_of_algorithms.append(
+                    GridSearchCV(
+                        LogisticRegression(
+                            solver="liblinear",  # lbfgs doesn't converge
+                            multi_class="auto",
+                            random_state=42,
+                        ),
+                        param_grid={"penalty": ["l1", "l2"], "C": [0.1, 0.3, 1, 3, 10]},
+                        scoring="balanced_accuracy",
+                        n_jobs=-1,
+                        cv=4,
+                    )
+                )
+            elif name == "KNN":
+                self.list_of_algorithms.append(
+                    GridSearchCV(
+                        KNeighborsClassifier(
+                            metric="euclidean"
+                        ),
+                        param_grid={"n_neighbors": [2,4,6]},
+                        scoring="balanced_accuracy",
+                        n_jobs=-1,
+                        cv=4,
+                    )
+                )
+
+    def _get_full_class_proba(self, pred_proba, model):
+        """" When the training set is only exposed to a subset of target classes,
+        the predicted probability for those classes with the multiclass classifier is 0.
+        To measure metrics, this needs to be accounted for.
+        This function fills up the classes not in the training set.
+        
+        Parameters
+        ----------
+        pred_proba : list of n_classes number of np.ndarrays of shape (n_samples, )
+            Predicted positive probability values.
+        model : sklearn classifier object
+            Trained model that gives the pred_proba array.
+        
+        Returns
+        -------
+        new_pred_proba : 
+            Updated pred_proba array with all classes.
+        """
+        new_pred_proba = []
+        for i in range(4):
+            if i not in model.classes_:
+                new_pred_proba.append(0)
+            else:
+                new_pred_proba.append(pred_proba[0][list(model.classes_).index(i)])
+        return np.array(new_pred_proba)
+    
+    def _processing_before_logging(self, model, X_test, y_yield_test):
+        # Should simplify (is common with label ranking )
+        pred_proba = model.predict_proba(X_test)
+        if len(pred_proba[0]) < self.dataset.n_rank_component :
+            pred_proba = self._get_full_class_proba(pred_proba, model)
+
+        if self.dataset.component_to_rank == "base":
+            if self.dataset.train_together : 
+                y_test_reshape = y_yield_test.reshape(4, 5).T
+                pred_rank_reshape = yield_to_ranking(pred_proba.reshape(4, 5).T)
+            else : 
+                y_test_reshape = y_yield_test.flatten()
+                pred_rank_reshape = yield_to_ranking(pred_proba.flatten())
+        elif self.dataset.component_to_rank == "sulfonyl_fluoride":
+            if self.dataset.train_together : 
+                y_test_reshape = y_yield_test.reshape(4, 5)
+                pred_rank_reshape = yield_to_ranking(pred_proba.reshape(4, 5))
+            else : 
+                y_test_reshape = y_yield_test.flatten()
+                pred_rank_reshape = yield_to_ranking(pred_proba.flatten())
+        elif self.dataset.component_to_rank == "both":
+            y_test_reshape = y_yield_test
+            pred_rank_reshape = yield_to_ranking(pred_proba)
+        return y_test_reshape, pred_rank_reshape
+
+    def train_and_evaluate_models(self) :
+        X = self._load_X()
+        y_rank = self.dataset.y_ranking
+        y_yield = self.dataset.y_yield
+        if (
+            type(self.outer_cv) == list
+        ):  # When one component is ranked but separating the datasets
+            y = [np.argmin(y_sub_rank, axis=1) for y_sub_rank in y_rank] # transforming ranks into multiclass outputs
+            self.perf_dict = []
+            for i, (X_array, array, yield_array, cv) in enumerate(zip(X, y, y_yield, self.outer_cv)): # X is not included as it remains the same across different reagents
+                perf_dict = deepcopy(PERFORMANCE_DICT)
+                print("X array shape:", X_array.shape)
+                # print("ARRAY SHAPE:", array.shape)
+                self._CV_loops(perf_dict, cv, X_array, array, self._processing_before_logging, y_yield=yield_array)
+                self.perf_dict.append(perf_dict)
+        else : 
+            y = np.argmin(y_rank, axis=1)
+            perf_dict = deepcopy(PERFORMANCE_DICT)
+            self._CV_loops(perf_dict, self.outer_cv, X, y, self._processing_before_logging, y_yield=y_yield)
+            self.perf_dict = perf_dict
+        return self
+
+    
 class LabelRankingEvaluator(Evaluator):
     """Evaluates multiple label ranking algorithms.
 
@@ -321,7 +458,7 @@ class LabelRankingEvaluator(Evaluator):
         super().__init__(dataset, n_rxns, outer_cv)
         self.feature_type = feature_type
         self.list_of_names = list_of_names
-
+    
         self.list_of_algorithms = []
         for name in self.list_of_names :
             if name == "RPC":
@@ -372,14 +509,7 @@ class LabelRankingEvaluator(Evaluator):
 
 
     def train_and_evaluate_models(self):
-        if self.feature_type == "desc":
-            X = self.dataset.X_desc
-        elif self.feature_type == "fp":
-            X = self.dataset.X_fp
-        elif self.feature_type == "onehot":
-            X = self.dataset.X_onehot
-        elif self.feature_type == "random":
-            X = self.dataset.X_random
+        X = self._load_X()
         y = self.dataset.y_ranking
         y_yield = self.dataset.y_yield
         if (
@@ -445,14 +575,7 @@ class RegressorEvaluator(Evaluator):
         Parameters
         ----------
         """
-        if self.feature_type == "desc":
-            X = self.dataset.X_desc
-        elif self.feature_type == "fp":
-            X = self.dataset.X_fp
-        elif self.feature_type == "onehot":
-            X = self.dataset.X_onehot
-        elif self.feature_type == "random":
-            X = self.dataset.X_random
+        X = self._load_X()
         y = self.dataset.y_yield
 
         self.models = [[] for _ in range(len(self.list_of_algorithms))]
