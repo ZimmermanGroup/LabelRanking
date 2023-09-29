@@ -8,6 +8,7 @@ from label_ranking import *
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.preprocessing import StandardScaler
 from sklr.tree import DecisionTreeLabelRanker
 
 PERFORMANCE_DICT = {
@@ -212,6 +213,9 @@ class Evaluator(ABC):
             y_train, y_test = y[train_ind], y[test_ind]
             if X is not None :
                 X_train, X_test = X[train_ind, :], X[test_ind]
+                std = StandardScaler()
+                X_train = std.fit_transform(X_train)
+                X_test = std.transform(X_test)
                 # print("X TRAIN SHAPE", X_train.shape)
             else :
                 X_test = y_train
@@ -282,6 +286,7 @@ class BaselineEvaluator(Evaluator):
             print(y.shape)
             self._CV_loops(self.perf_dict, self.outer_cv, None, y, self._processing_before_logging)
         return self
+
 
 class MulticlassEvaluator(Evaluator):
     """ Evaluates multiclass classifiers.
@@ -425,6 +430,125 @@ class MulticlassEvaluator(Evaluator):
             self.perf_dict = perf_dict
         return self
 
+#TODO
+class MultilabelEvaluator(MulticlassEvaluator):
+    """Evaluates multilabel classifiers.
+    
+    Parameters
+    ----------
+    dataset : Dataset object as in Dataloader.py
+        Dataset to utilize.
+    feature_type : str {'desc', 'fp', 'onehot', 'random'}
+        Which representation to use as inputs.
+    n_rxns : int
+        Number of reactions that is simulated to be conducted.
+    outer_cv : sklearn split object
+        Cross-validation scheme to 'evaluate' the algorithms.
+
+    """
+    def __init__(
+        self,
+        dataset,
+        feature_type,
+        list_of_names,
+        outer_cv,
+        n_rxns=1,
+    ):
+        super().__init__(dataset, feature_type, list_of_names, outer_cv, n_rxns,)
+        
+        self.list_of_algorithms = []
+        for name in self.list_of_names :
+            if name == "RFC":
+                self.list_of_algorithms.append(
+                    GridSearchCV(
+                        RandomForestClassifier(random_state=42),
+                        param_grid={"n_estimators": [25, 50, 100], "max_depth": [3, 5, None]},
+                        scoring="roc_auc",
+                        n_jobs=-1,
+                        cv=3,
+                    )
+                )
+            elif name == "LR" :
+                list_of_lrs = []
+                if type(self.dataset.y_label) == np.ndarray :
+                    for i in range(self.dataset.y_label.shape[1]) :
+                        if len(np.unique(self.dataset.y_label[:,i])) > 1 :
+                            list_of_lrs.append(
+                                LogisticRegression(
+                                    penalty="l1",
+                                    solver="liblinear",  # lbfgs doesn't converge
+                                    random_state=42,
+                                )
+                            )
+                        else :
+                            list_of_lrs.append(None)
+                elif type(self.dataset.y_label) == list :
+                    list_of_lrs.extend([LogisticRegression(
+                                    penalty="l1",
+                                    solver="liblinear",  # lbfgs doesn't converge
+                                    random_state=42,
+                                )]*self.n_rank_component)
+                self.list_of_algorithms.append(list_of_lrs)
+
+            elif name == "KNN":
+                self.list_of_algorithms.append(
+                    GridSearchCV(
+                        KNeighborsClassifier(
+                            metric="euclidean"
+                        ),
+                        param_grid={"n_neighbors": [2,4,6]},
+                        scoring="roc_auc",
+                        n_jobs=-1,
+                        cv=4,
+                    )
+                )
+
+
+    def _processing_before_logging(self, model, X_test, y_yield_test):
+        # Should simplify (is common with label ranking )
+        pred_proba = model.predict_proba(X_test)
+        print(pred_proba)
+        if self.dataset.train_together:
+            pred_proba = np.hstack(tuple(
+                [x[:,1].reshape(-1,1) if x.shape[1]>1 else x.flatten().reshape(-1,1)
+                  for x in pred_proba]
+            ))
+            y_test_reshape = y_yield_test
+        else :
+            pred_proba = np.array(
+                [
+                    x[0][1] if len(x[0]) == 2 else 1 - x[0][0]
+                    for x in pred_proba
+                ]
+            )
+            y_test_reshape = y_yield_test.flatten()
+        print(pred_proba.shape)
+        print("Y YIELD TEST SHAPE", y_yield_test.shape)
+        pred_rank_reshape = yield_to_ranking(pred_proba)
+        
+        return y_test_reshape, pred_rank_reshape
+    
+
+    def train_and_evaluate_models(self) :
+        X = self._load_X()
+        y_label = self.dataset.y_label
+        y_yield = self.dataset.y_yield
+        if (
+            type(self.outer_cv) == list
+        ):  # When one component is ranked but separating the datasets
+            self.perf_dict = []
+            for i, (X_array, array, yield_array, cv) in enumerate(zip(X, y_label, y_yield, self.outer_cv)): # X is not included as it remains the same across different reagents
+                perf_dict = deepcopy(PERFORMANCE_DICT)
+                print("X array shape:", X_array.shape)
+                print("Y test array", yield_array)
+                # print("ARRAY SHAPE:", array.shape)
+                self._CV_loops(perf_dict, cv, X_array, array, self._processing_before_logging, y_yield=yield_array)
+                self.perf_dict.append(perf_dict)
+        else : 
+            perf_dict = deepcopy(PERFORMANCE_DICT)
+            self._CV_loops(perf_dict, self.outer_cv, X, y_label, self._processing_before_logging, y_yield=y_yield)
+            self.perf_dict = perf_dict
+        return self
     
 class LabelRankingEvaluator(Evaluator):
     """Evaluates multiple label ranking algorithms.

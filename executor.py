@@ -173,6 +173,15 @@ def run_informer(parser):
                 ps, 
             ).train_and_evaluate_models()
             perf_dicts.append(label_ranking_evaluator.perf_dict)
+        if len(classifiers) > 0 :
+            if n_rxns > 1 :
+                classifier_evaluator = MultilabelEvaluator(
+                    dataset,
+                    parser.feature,
+                    classifiers,
+                    ps
+                ).train_and_evaluate_models()
+            perf_dicts.append(classifier_evaluator.perf_dict)
 
     return perf_dicts
 

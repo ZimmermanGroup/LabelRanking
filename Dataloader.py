@@ -101,6 +101,14 @@ class InformerDataset(Dataset) :
         self.smiles_list = smiles_list
 
 
+        if self.component_to_rank == "amine_ratio":
+            self.n_rank_component = 10
+            self.n_non_rank_component = 4  # 4 catalyst ratio values
+        elif self.component_to_rank == "catalyst_ratio":
+            self.n_rank_component = 20
+            self.n_non_rank_component = 2  # 2 amine ratio values
+
+
     def _prep_distance_arrays(self):
         """ Tanimoto distances between the substrates, used for neighbor based models. """
         mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
@@ -292,10 +300,28 @@ class InformerDataset(Dataset) :
 
     @property
     def y_label(self):
-        yields = self.y_yield()
-        nth_highest_yield = np.partition(yields, -1*self.n_rxns, axis=1)[-1*self.n_rxns]
-        labels = np.zeros_like() # assuming for now that it's given in the right shape
-        #TODO
+        yields = self.y_yield
+        if type(yields) == list :
+            labels = []
+            for i, y in enumerate(yields) :
+                label = np.zeros_like(y)
+                # print(y)
+                nth_highest_yield = np.partition(y, -1*self.n_rxns, axis=1)[:, -1*self.n_rxns]    
+                label[y >= np.hstack(tuple([nth_highest_yield.reshape(-1,1)]*y.shape[1]))] = 1
+                # print(label)
+                assert np.all(np.sum(label, axis=1) >= self.n_rxns)
+                labels.append(label)
+        elif type(yields) == np.ndarray:
+            labels = np.zeros_like(yields)
+            # print(yields)
+            nth_highest_yield = np.partition(yields, -1*self.n_rxns, axis=1)[:, -1*self.n_rxns]
+            labels[yields >= np.hstack(tuple([nth_highest_yield.reshape(-1,1)]*yields.shape[1]))] = 1
+            # print(labels)
+            # print(len(np.sum(labels, axis=1)))
+            assert np.all(np.sum(labels, axis=1) >= self.n_rxns)
+        self._y_label = labels
+        return self._y_label
+
 
 class DeoxyDataset:
     """
