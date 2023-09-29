@@ -178,6 +178,20 @@ class Evaluator(ABC):
         elif self.feature_type == "random":
             X = self.dataset.X_random
         return X
+    
+    def _dist_array_train_test_split(self, dist_array, test_ind):
+        train_dists = np.vstack(
+            tuple([row for ind, row in enumerate(dist_array) if ind != test_ind])
+        )
+        train_dists = train_dists[
+            :, [x for x in range(train_dists.shape[1]) if x != test_ind]
+        ]
+        test_dists = dist_array[
+            test_ind, [x for x in range(dist_array.shape[1]) if x != test_ind]
+        ]
+        print("TRAIN DIST", train_dists)
+        print("TEST DIST", test_dists)
+        return train_dists, test_dists
 
     @abstractmethod
     def train_and_evaluate_models(self):
@@ -227,8 +241,7 @@ class Evaluator(ABC):
                 zip(self.list_of_algorithms, self.list_of_names)
             ):
                 if X is not None :
-                    if type(model.estimator) == LogisticRegression :
-                        print("Logistic regression detected")
+                    if type(model)==GridSearchCV and type(model.estimator) == LogisticRegression :
                         trained_models = []
                         for i in range(y_train.shape[1]) :
                             if np.sum(y_train[:, i]) in [0, y_train.shape[0]]:
@@ -245,10 +258,24 @@ class Evaluator(ABC):
                                 lr.fit(X_train, y_train[:, i])
                                 trained_models.append(lr)
                         model = trained_models
+                    elif (type(model)==GridSearchCV and type(model.estimator) == KNeighborsClassifier or\
+                           type(model) in [IBLR_M, IBLR_PL]) and\
+                          not self.dataset.train_together:
+                        print("Correct classification of IBM")
+                        dist_array = self.dataset.X_dist
+                        train_dists, test_dists = self._dist_array_train_test_split(dist_array, test_ind)
+                        model.fit(train_dists, y_train)
+                        test_dists = test_dists.reshape(1,-1)
                     else :
                         model.fit(X_train, y_train)
                 if y_yield is None : 
                     processed_y_test, processed_pred_rank = further_action_before_logging(model, X_test, y_test)
+                elif (
+                    type(model)==GridSearchCV and type(model.estimator) == KNeighborsClassifier or\
+                         type(model) in [IBLR_M, IBLR_PL] and\
+                          not self.dataset.train_together
+                ):
+                    processed_y_test, processed_pred_rank = further_action_before_logging(model, test_dists, y_yield_test)
                 else : 
                     processed_y_test, processed_pred_rank = further_action_before_logging(model, X_test, y_yield_test)
                 self._evaluate_alg(
@@ -364,10 +391,14 @@ class MulticlassEvaluator(Evaluator):
                     )
                 )
             elif name == "KNN":
+                if self.dataset.train_together :
+                    metric="euclidean"
+                else :
+                    metric = "precomputed"
                 self.list_of_algorithms.append(
                     GridSearchCV(
                         KNeighborsClassifier(
-                            metric="euclidean"
+                            metric=metric
                         ),
                         param_grid={"n_neighbors": [2,4,6]},
                         scoring="balanced_accuracy",
@@ -503,12 +534,15 @@ class MultilabelEvaluator(MulticlassEvaluator):
                         cv=3,
                     )
                 )
-
             elif name == "KNN":
+                if self.dataset.train_together :
+                    metric = "euclidean"
+                else :
+                    metric = "precomputed"
                 self.list_of_algorithms.append(
                     GridSearchCV(
                         KNeighborsClassifier(
-                            metric="euclidean"
+                            metric=metric
                         ),
                         param_grid={"n_neighbors": [2,4,6]},
                         scoring="roc_auc",
@@ -516,7 +550,6 @@ class MultilabelEvaluator(MulticlassEvaluator):
                         cv=4,
                     )
                 )
-
 
     def _processing_before_logging(self, model, X_test, y_yield_test):
         if type(model) == list : # Only for multilabel Logistic Regressions
@@ -531,6 +564,7 @@ class MultilabelEvaluator(MulticlassEvaluator):
                     pred_proba.append(lr.predict_proba(X_test))
             print(pred_proba)
         else :
+            print(X_test)
             pred_proba = model.predict_proba(X_test)
             print(pred_proba)
         if self.dataset.train_together:

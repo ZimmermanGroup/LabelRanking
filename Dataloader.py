@@ -49,6 +49,23 @@ class Dataset(ABC):
         self.for_regressor = for_regressor
         self.n_rxns = n_rxns
 
+    @property
+    def X_dist(self):
+        """ Tanimoto distances between the substrates, used for neighbor based models. """
+        mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
+        cfp_nonnp = [
+            mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in self.smiles_list
+        ]
+        dists = np.zeros((len(cfp_nonnp), len(cfp_nonnp)))
+        for i in range(1, len(cfp_nonnp)):
+            similarities = DataStructs.BulkTanimotoSimilarity(
+                cfp_nonnp[i], cfp_nonnp[:i]
+            )
+            dists[i, :i] = np.array([1 - x for x in similarities])
+        dists += dists.T
+        self._X_dist = dists
+        print("DISTARRAY",dists)
+        return self._X_dist
 
 class InformerDataset(Dataset) :
     """
@@ -100,30 +117,12 @@ class InformerDataset(Dataset) :
         self.desc = desc_df.to_numpy()
         self.smiles_list = smiles_list
 
-
         if self.component_to_rank == "amine_ratio":
             self.n_rank_component = 10
             self.n_non_rank_component = 4  # 4 catalyst ratio values
         elif self.component_to_rank == "catalyst_ratio":
             self.n_rank_component = 20
             self.n_non_rank_component = 2  # 2 amine ratio values
-
-
-    def _prep_distance_arrays(self):
-        """ Tanimoto distances between the substrates, used for neighbor based models. """
-        mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
-        cfp_nonnp = [
-            mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in self.smiles_list
-        ]
-        dists = np.zeros((len(cfp_nonnp), len(cfp_nonnp)))
-        for i in range(1, len(cfp_nonnp)):
-            similarities = DataStructs.BulkTanimotoSimilarity(
-                cfp_nonnp[i], cfp_nonnp[:i]
-            )
-            dists[i, :i] = np.array([1 - x for x in similarities])
-        dists += dists.T
-        self.dists_for_neighbors = dists
-        return self
     
     def _split_arrays(self, substrate_array_to_process, other_array, return_X=True):
         if self.for_regressor :
@@ -323,7 +322,7 @@ class InformerDataset(Dataset) :
         return self._y_label
 
 
-class DeoxyDataset:
+class DeoxyDataset(Dataset):
     """
     Prepares arrays from the deoxyfluorination dataset for downstream use.
 
@@ -350,7 +349,7 @@ class DeoxyDataset:
         self.train_together = train_together
         self.n_rxns = n_rxns
 
-        self.substrate_smiles = [
+        self.smiles_list = [
             x[0]
             for x in pd.read_excel(
                 "datasets/deoxyfluorination/substrate_smiles.xlsx", header=None
@@ -451,8 +450,8 @@ class DeoxyDataset:
             n_features depends on self.for_regressor
         """
         mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=fpSize)
-        fp_array = np.zeros((len(self.substrate_smiles), fpSize))
-        for i, smiles in enumerate(self.substrate_smiles):
+        fp_array = np.zeros((len(self.smiles_list), fpSize))
+        for i, smiles in enumerate(self.smiles_list):
             fp_array[i] = mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(smiles))
         reagent_desc = self.descriptors[:, -4:]
         if self.for_regressor:
