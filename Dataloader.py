@@ -51,7 +51,7 @@ class Dataset(ABC):
 
     @property
     def X_dist(self):
-        """ Tanimoto distances between the substrates, used for neighbor based models. """
+        """Tanimoto distances between the substrates, used for neighbor based models."""
         mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
         cfp_nonnp = [
             mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in self.smiles_list
@@ -64,10 +64,11 @@ class Dataset(ABC):
             dists[i, :i] = np.array([1 - x for x in similarities])
         dists += dists.T
         self._X_dist = dists
-        print("DISTARRAY",dists)
+        # print("DISTARRAY",dists)
         return self._X_dist
 
-class InformerDataset(Dataset) :
+
+class InformerDataset(Dataset):
     """
     Prepares arrays from the nickella-photoredox informer for downstream use.
 
@@ -82,13 +83,14 @@ class InformerDataset(Dataset) :
         Only considered when component_to_rank is not 'both'.
     component_to_rank : str {'both', 'amine_ratio', 'catalyst_ratio'}
         Which reaction component to be ranked.
-    
+
     Attributes
     ----------
-    X_fp : 
+    X_fp :
         Only fingerprint arrays are considered for substrates.
     """
-    def __init__(self, for_regressor, component_to_rank, train_together, n_rxns) :
+
+    def __init__(self, for_regressor, component_to_rank, train_together, n_rxns):
         super().__init__(for_regressor, n_rxns)
         self.component_to_rank = component_to_rank
         self.train_together = train_together
@@ -98,7 +100,9 @@ class InformerDataset(Dataset) :
         desc_df = pd.read_excel(
             "datasets/Informer.xlsx", sheet_name="descriptors", usecols=[0, 1, 2, 3, 4]
         ).iloc[:40, :]
-        smiles = pd.read_excel("datasets/Informer.xlsx", sheet_name="smiles", header=None)
+        smiles = pd.read_excel(
+            "datasets/Informer.xlsx", sheet_name="smiles", header=None
+        )
 
         # Dropping compounds where all yields are below 20%
         cols_to_erase = []
@@ -109,7 +113,9 @@ class InformerDataset(Dataset) :
             :, [x for x in range(1, 19) if x not in cols_to_erase]
         ]  # leaves 11 compounds
         smiles_list = [
-            x[0] for i, x in enumerate(smiles.values.tolist()) if i + 1 not in cols_to_erase
+            x[0]
+            for i, x in enumerate(smiles.values.tolist())
+            if i + 1 not in cols_to_erase
         ]
 
         # Assigning the arrays
@@ -123,24 +129,29 @@ class InformerDataset(Dataset) :
         elif self.component_to_rank == "catalyst_ratio":
             self.n_rank_component = 20
             self.n_non_rank_component = 2  # 2 amine ratio values
-    
+
     def _split_arrays(self, substrate_array_to_process, other_array, return_X=True):
-        if self.for_regressor :
+        if self.for_regressor:
             arrays = []
             for i, (_, yield_vals) in enumerate(self.df.items()):
-                if return_X : 
+                if return_X:
                     arrays.append(
-                        np.hstack((np.tile(substrate_array_to_process[i, :], (40, 1)), other_array))
+                        np.hstack(
+                            (
+                                np.tile(substrate_array_to_process[i, :], (40, 1)),
+                                other_array,
+                            )
+                        )
                     )
-                else :
+                else:
                     arrays.append(yield_vals.to_numpy())
-            if return_X : 
+            if return_X:
                 array = np.vstack(tuple(arrays))
-            else :
+            else:
                 array = np.concatenate(tuple(arrays))
             if self.train_together:
                 processed_array = array
-            else :
+            else:
                 if self.component_to_rank == "catalyst_ratio":
                     processed_array = [
                         array[[x for x in range(array.shape[0]) if x % 8 < 4]],
@@ -151,77 +162,105 @@ class InformerDataset(Dataset) :
                         array[[y for y in range(array.shape[0]) if y % 4 == x]]
                         for x in range(4)
                     ]
-                if return_X :
+                if return_X:
                     assert np.all(processed_array[0] == processed_array[1])
                     processed_array = processed_array[0]
-        else :
+        else:
             yield_array = self.df.to_numpy()
             if self.component_to_rank == "amine_ratio":
-                if not return_X :
-                    if not self.train_together :
+                if not return_X:
+                    if not self.train_together:
                         processed_array = [
-                            yield_array[[y for y in range(yield_array.shape[0]) if y % 4 == x], :].T
+                            yield_array[
+                                [y for y in range(yield_array.shape[0]) if y % 4 == x],
+                                :,
+                            ].T
                             for x in range(4)  # 11 x 10
                         ]
-                    else :
+                    else:
                         first_amine = []
-                        for i, row in enumerate(yield_array.T) :
+                        for i, row in enumerate(yield_array.T):
                             first_amine.append([])
-                            for j in range(10) : # 10 chunks of 4-catalyst ratio values
-                                first_amine[i].append(row[4*j:4*(j+1)].reshape(-1,1))                                
-                        processed_array = np.vstack(tuple([np.hstack(tuple(sub_array)) for sub_array in first_amine]))
+                            for j in range(10):  # 10 chunks of 4-catalyst ratio values
+                                first_amine[i].append(
+                                    row[4 * j : 4 * (j + 1)].reshape(-1, 1)
+                                )
+                        processed_array = np.vstack(
+                            tuple(
+                                [
+                                    np.hstack(tuple(sub_array))
+                                    for sub_array in first_amine
+                                ]
+                            )
+                        )
 
-                else : 
+                else:
                     if not self.train_together:
                         processed_array = [substrate_array_to_process] * 4
-                    else :
-                        processed_array = np.hstack((
-                            np.repeat(substrate_array_to_process, 4, axis=0),
-                            other_array
-                        ))
+                    else:
+                        processed_array = np.hstack(
+                            (
+                                np.repeat(substrate_array_to_process, 4, axis=0),
+                                other_array,
+                            )
+                        )
             elif self.component_to_rank == "catalyst_ratio":
-                if not return_X : 
-                    if not self.train_together :
+                if not return_X:
+                    if not self.train_together:
                         processed_array = [
                             yield_array[
                                 [x for x in range(yield_array.shape[0]) if x % 8 < 4], :
                             ].T,  # 11 x 20
                             yield_array[
-                                [x for x in range(yield_array.shape[0]) if x % 8 >= 4], :
+                                [x for x in range(yield_array.shape[0]) if x % 8 >= 4],
+                                :,
                             ].T,
                         ]
-                    else :
+                    else:
                         if not self.train_together:
                             processed_array = yield_array.reshape()
-                        else :
+                        else:
                             first_amine = []
                             second_amine = []
-                            for i, row in enumerate(yield_array.T) :
+                            for i, row in enumerate(yield_array.T):
                                 first_amine.append([])
                                 second_amine.append([])
-                                for j in range(10) : # 10 chunks of 4-catalyst ratio values
-                                    if j % 2 == 0 :
-                                        first_amine[i].append(row[4*j:4*(j+1)].reshape(1,-1))
-                                    else :
-                                        second_amine[i].append(row[4*j:4*(j+1)].reshape(1,-1))
+                                for j in range(
+                                    10
+                                ):  # 10 chunks of 4-catalyst ratio values
+                                    if j % 2 == 0:
+                                        first_amine[i].append(
+                                            row[4 * j : 4 * (j + 1)].reshape(1, -1)
+                                        )
+                                    else:
+                                        second_amine[i].append(
+                                            row[4 * j : 4 * (j + 1)].reshape(1, -1)
+                                        )
                             subs_arrays = []
-                            for row_first_amine, row_second_amine in zip(first_amine, second_amine):
-                                subs_arrays.append(np.vstack((
-                                    np.hstack(tuple(row_first_amine)),
-                                    np.hstack(tuple(row_second_amine))
-                                )))
-                            processed_array = np.vstack(tuple(subs_arrays))                                
-                else : 
-                    if not self.train_together :
+                            for row_first_amine, row_second_amine in zip(
+                                first_amine, second_amine
+                            ):
+                                subs_arrays.append(
+                                    np.vstack(
+                                        (
+                                            np.hstack(tuple(row_first_amine)),
+                                            np.hstack(tuple(row_second_amine)),
+                                        )
+                                    )
+                                )
+                            processed_array = np.vstack(tuple(subs_arrays))
+                else:
+                    if not self.train_together:
                         processed_array = [substrate_array_to_process] * 2
-                    else :
-                        processed_array = np.hstack((
-                            np.repeat(substrate_array_to_process, 2, axis=0),
-                            other_array
-                        ))
+                    else:
+                        processed_array = np.hstack(
+                            (
+                                np.repeat(substrate_array_to_process, 2, axis=0),
+                                other_array,
+                            )
+                        )
 
         return processed_array
-
 
     @property
     def X_fp(self, fpSize=1024, radius=3):
@@ -247,42 +286,70 @@ class InformerDataset(Dataset) :
             for x in self.smiles_list
         ]
         cfp_array = np.vstack(tuple(cfp))
-        if self.for_regressor :
-            if self.train_together :
+        if self.for_regressor:
+            if self.train_together:
                 other_array = self.desc
-            elif self.component_to_rank == "amine_ratio" :
-                other_array = np.hstack((self.desc[:,:3], self.desc[:,-1].reshape(-1,1)))
-            elif self.component_to_rank == "catalyst_ratio" :
-                other_array = self.desc[:,:4]
-        else :
-            if not self.train_together :
+            elif self.component_to_rank == "amine_ratio":
+                other_array = np.hstack(
+                    (self.desc[:, :3], self.desc[:, -1].reshape(-1, 1))
+                )
+            elif self.component_to_rank == "catalyst_ratio":
+                other_array = self.desc[:, :4]
+        else:
+            if not self.train_together:
                 other_array = None
-            else :
-                if self.component_to_rank == "amine_ratio" :
+            else:
+                if self.component_to_rank == "amine_ratio":
                     other_array = np.repeat(
-                        self.desc[:4,:-1], 11, axis=0
-                    ) #20  match 44
-                elif self.component_to_rank == "catalyst_ratio" :
-                    other_array = np.repeat(np.vstack(tuple(
-                        [row for i, row in enumerate(np.hstack((self.desc[:8,:3], self.desc[:8,-1].reshape(-1,1)))) if i%4==0]
-                    )), 11, axis=0) #10 match 22
+                        self.desc[:4, :-1], 11, axis=0
+                    )  # 20  match 44
+                elif self.component_to_rank == "catalyst_ratio":
+                    other_array = np.repeat(
+                        np.vstack(
+                            tuple(
+                                [
+                                    row
+                                    for i, row in enumerate(
+                                        np.hstack(
+                                            (
+                                                self.desc[:8, :3],
+                                                self.desc[:8, -1].reshape(-1, 1),
+                                            )
+                                        )
+                                    )
+                                    if i % 4 == 0
+                                ]
+                            )
+                        ),
+                        11,
+                        axis=0,
+                    )  # 10 match 22
         self._X_fp = self._split_arrays(cfp_array, other_array)
         return self._X_fp
-    
+
     @property
     def X_desc(self, fpSize=1024, radius=3):
         return self.X_fp(fpSize=fpSize, radius=radius)
-    
+
     @property
     def X_onehot(self):
-        "Prepares onehot arrays."  
+        "Prepares onehot arrays."
         substrate_onehot_array = np.identity(len(self.smiles_list))
         photocat_onehot_array = np.repeat(np.identity(5), 8, axis=0)
         cat_ratio_onehot_array = np.tile(np.identity(4), (10, 1))
         amine_ratio_onehot_array = np.tile(np.repeat(np.identity(2), 4, axis=0), (5, 1))
-        self._X_onehot = self._split_arrays(substrate_onehot_array, np.hstack((photocat_onehot_array, cat_ratio_onehot_array, amine_ratio_onehot_array)))
+        self._X_onehot = self._split_arrays(
+            substrate_onehot_array,
+            np.hstack(
+                (
+                    photocat_onehot_array,
+                    cat_ratio_onehot_array,
+                    amine_ratio_onehot_array,
+                )
+            ),
+        )
         return self._X_onehot
-    
+
     @property
     def y_yield(self):
         self._y_yield = self._split_arrays(None, None, return_X=False)
@@ -291,30 +358,42 @@ class InformerDataset(Dataset) :
 
     @property
     def y_ranking(self):
-        if type(self.y_yield) == list :
+        if type(self.y_yield) == list:
             self._y_ranking = [yield_to_ranking(x) for x in self.y_yield]
-        elif type(self.y_yield) == np.ndarray :
+        elif type(self.y_yield) == np.ndarray:
             self._y_ranking = yield_to_ranking(self.y_yield)
         return self._y_ranking
 
     @property
     def y_label(self):
         yields = self.y_yield
-        if type(yields) == list :
+        if type(yields) == list:
             labels = []
-            for i, y in enumerate(yields) :
+            for i, y in enumerate(yields):
                 label = np.zeros_like(y)
                 # print(y)
-                nth_highest_yield = np.partition(y, -1*self.n_rxns, axis=1)[:, -1*self.n_rxns]    
-                label[y >= np.hstack(tuple([nth_highest_yield.reshape(-1,1)]*y.shape[1]))] = 1
+                nth_highest_yield = np.partition(y, -1 * self.n_rxns, axis=1)[
+                    :, -1 * self.n_rxns
+                ]
+                label[
+                    y
+                    >= np.hstack(tuple([nth_highest_yield.reshape(-1, 1)] * y.shape[1]))
+                ] = 1
                 # print(label)
                 assert np.all(np.sum(label, axis=1) >= self.n_rxns)
                 labels.append(label)
         elif type(yields) == np.ndarray:
             labels = np.zeros_like(yields)
             # print(yields)
-            nth_highest_yield = np.partition(yields, -1*self.n_rxns, axis=1)[:, -1*self.n_rxns]
-            labels[yields >= np.hstack(tuple([nth_highest_yield.reshape(-1,1)]*yields.shape[1]))] = 1
+            nth_highest_yield = np.partition(yields, -1 * self.n_rxns, axis=1)[
+                :, -1 * self.n_rxns
+            ]
+            labels[
+                yields
+                >= np.hstack(
+                    tuple([nth_highest_yield.reshape(-1, 1)] * yields.shape[1])
+                )
+            ] = 1
             # print(labels)
             # print(len(np.sum(labels, axis=1)))
             assert np.all(np.sum(labels, axis=1) >= self.n_rxns)

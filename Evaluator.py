@@ -20,6 +20,7 @@ PERFORMANCE_DICT = {
     "model": [],
 }
 
+
 class Evaluator(ABC):
     """Base class for evaluators for various types of algorithsm.
 
@@ -169,6 +170,7 @@ class Evaluator(ABC):
         self._update_perf_dict(perf_dict, kt, rr, mrr, regret, comp, model)
 
     def _load_X(self):
+        """Prepares the input features based on the specified type."""
         if self.feature_type == "desc":
             X = self.dataset.X_desc
         elif self.feature_type == "fp":
@@ -178,8 +180,26 @@ class Evaluator(ABC):
         elif self.feature_type == "random":
             X = self.dataset.X_random
         return X
-    
+
     def _dist_array_train_test_split(self, dist_array, test_ind):
+        """
+        Splits a precomputed distance array into those only with training compounds and test compounds.
+        We assume that only one test compound is left out.
+
+        Parameters
+        ----------
+        dist_array : np.ndarray of shape (n_substrates, n_substrates)
+            Precomputed Tanimoto distance array.
+        test_ind : int [0, dist_array.shape[0]-1]
+            Index of the test compound to separate out from the dist_array.
+
+        Returns
+        -------
+        train_dists : np.ndarray of shape (n_substrates-1, n_substrates-1)
+            Distances between the training compounds.
+        test_dists : np.ndarray of shape (n_substrates-1)
+            Distance of test compound to all other training compounds.
+        """
         train_dists = np.vstack(
             tuple([row for ind, row in enumerate(dist_array) if ind != test_ind])
         )
@@ -189,21 +209,23 @@ class Evaluator(ABC):
         test_dists = dist_array[
             test_ind, [x for x in range(dist_array.shape[1]) if x != test_ind]
         ]
-        print("TRAIN DIST", train_dists)
-        print("TEST DIST", test_dists)
+        # print("TRAIN DIST", train_dists)
+        # print("TEST DIST", test_dists)
         return train_dists, test_dists
 
     @abstractmethod
     def train_and_evaluate_models(self):
         pass
 
-    def _CV_loops(self, perf_dict, cv, X, y, further_action_before_logging, y_yield=None):
-        """ 
+    def _CV_loops(
+        self, perf_dict, cv, X, y, further_action_before_logging, y_yield=None
+    ):
+        """
         Implements multiple CV loops that are utilized across all algorithms.
-        
+
         Parameters
         ----------
-        perf_dict : dict 
+        perf_dict : dict
             Dictionary to keep track of performance measurements.
         cv : sklearn split object
             Cross-validation scheme to execute.
@@ -216,7 +238,7 @@ class Evaluator(ABC):
             Parameters: trained model, X_test, test_YIELD_ARRAY
         y_yield : np.ndarray of shape (n_reactions, )
             For label rankers and classifiers that does not use raw yields.
-        
+
         Returns
         -------
         self
@@ -225,31 +247,36 @@ class Evaluator(ABC):
         for a, (train_ind, test_ind) in enumerate(cv.split()):
             # for j, array in enumerate(y) :
             y_train, y_test = y[train_ind], y[test_ind]
-            if X is not None :
+            if X is not None:
                 X_train, X_test = X[train_ind, :], X[test_ind]
                 std = StandardScaler()
                 X_train = std.fit_transform(X_train)
                 X_test = std.transform(X_test)
                 # print("X TRAIN SHAPE", X_train.shape)
-            else :
+            else:
                 X_test = y_train
-            if y_yield is not None :
+            if y_yield is not None:
                 y_yield_test = y_yield[test_ind]
                 # print("Y TEST SHAPE", y_yield_test.shape)
             print("Compound", a)
             for b, (model, model_name) in enumerate(
                 zip(self.list_of_algorithms, self.list_of_names)
             ):
-                if X is not None :
-                    if type(model)==GridSearchCV and type(model.estimator) == LogisticRegression :
+                if X is not None:
+                    if (
+                        type(model) == GridSearchCV
+                        and type(model.estimator) == LogisticRegression
+                    ):
                         trained_models = []
-                        for i in range(y_train.shape[1]) :
+                        for i in range(y_train.shape[1]):
                             if np.sum(y_train[:, i]) in [0, y_train.shape[0]]:
-                                trained_models.append(float(np.sum(y_train[:,i])/y_train.shape[0]))
-                            elif np.sum(y_train[:, i]) > 3 :
+                                trained_models.append(
+                                    float(np.sum(y_train[:, i]) / y_train.shape[0])
+                                )
+                            elif np.sum(y_train[:, i]) > 3:
                                 model.fit(X_train, y_train[:, i])
                                 trained_models.append(model)
-                            else :
+                            else:
                                 lr = LogisticRegression(
                                     penalty="l1",
                                     solver="liblinear",  # lbfgs doesn't converge
@@ -258,26 +285,42 @@ class Evaluator(ABC):
                                 lr.fit(X_train, y_train[:, i])
                                 trained_models.append(lr)
                         model = trained_models
-                    elif (type(model)==GridSearchCV and type(model.estimator) == KNeighborsClassifier or\
-                           type(model) in [IBLR_M, IBLR_PL]) and\
-                          not self.dataset.train_together:
-                        print("Correct classification of IBM")
+                    # For nearest neighbor based models, if the substrate features are the only inputs
+                    # to the model, use Tanimoto distances.
+                    elif (
+                        type(model) == GridSearchCV
+                        and type(model.estimator) == KNeighborsClassifier
+                        or type(model) in [IBLR_M, IBLR_PL]
+                    ) and not self.dataset.train_together:
                         dist_array = self.dataset.X_dist
-                        train_dists, test_dists = self._dist_array_train_test_split(dist_array, test_ind)
+                        train_dists, test_dists = self._dist_array_train_test_split(
+                            dist_array, test_ind
+                        )
                         model.fit(train_dists, y_train)
-                        test_dists = test_dists.reshape(1,-1)
-                    else :
+                        test_dists = test_dists.reshape(1, -1)
+                    else:
                         model.fit(X_train, y_train)
-                if y_yield is None : 
-                    processed_y_test, processed_pred_rank = further_action_before_logging(model, X_test, y_test)
+                if y_yield is None:
+                    (
+                        processed_y_test,
+                        processed_pred_rank,
+                    ) = further_action_before_logging(model, X_test, y_test)
+                # Nearest neighbors based models require different input from other algorithms.
                 elif (
-                    type(model)==GridSearchCV and type(model.estimator) == KNeighborsClassifier or\
-                         type(model) in [IBLR_M, IBLR_PL] and\
-                          not self.dataset.train_together
+                    type(model) == GridSearchCV
+                    and type(model.estimator) == KNeighborsClassifier
+                    or type(model) in [IBLR_M, IBLR_PL]
+                    and not self.dataset.train_together
                 ):
-                    processed_y_test, processed_pred_rank = further_action_before_logging(model, test_dists, y_yield_test)
-                else : 
-                    processed_y_test, processed_pred_rank = further_action_before_logging(model, X_test, y_yield_test)
+                    (
+                        processed_y_test,
+                        processed_pred_rank,
+                    ) = further_action_before_logging(model, test_dists, y_yield_test)
+                else:
+                    (
+                        processed_y_test,
+                        processed_pred_rank,
+                    ) = further_action_before_logging(model, X_test, y_yield_test)
                 self._evaluate_alg(
                     perf_dict,
                     processed_y_test,
@@ -303,6 +346,7 @@ class BaselineEvaluator(Evaluator):
     perf_dict : dict or list of dicts
         Records of model performances, measured by rr, mrr, regret and kendall tau, over each test compound.
     """
+
     def __init__(self, dataset, n_rxns, outer_cv):
         super().__init__(dataset, n_rxns, outer_cv)
         self.list_of_algorithms = ["Baseline"]
@@ -317,26 +361,30 @@ class BaselineEvaluator(Evaluator):
 
     def train_and_evaluate_models(self):
         y = self.dataset.y_yield
-        print("LENGTH Y", len(y))
+        # print("LENGTH Y", len(y))
         if type(self.outer_cv) == list:
-            print("LIST CV")
+            # print("LIST CV")
             self.perf_dict = []
             for i, (array, cv) in enumerate(zip(y, self.outer_cv)):
                 # print(i, array[:3, :])
-                print(i, cv)
+                # print(i, cv)
                 perf_dict = deepcopy(PERFORMANCE_DICT)
-                self._CV_loops(perf_dict, cv, None, array, self._processing_before_logging)
+                self._CV_loops(
+                    perf_dict, cv, None, array, self._processing_before_logging
+                )
                 self.perf_dict.append(perf_dict)
-        else :
+        else:
             self.perf_dict = PERFORMANCE_DICT
-            print(y.shape)
-            self._CV_loops(self.perf_dict, self.outer_cv, None, y, self._processing_before_logging)
+            # print(y.shape)
+            self._CV_loops(
+                self.perf_dict, self.outer_cv, None, y, self._processing_before_logging
+            )
         return self
 
 
 class MulticlassEvaluator(Evaluator):
-    """ Evaluates multiclass classifiers.
-    
+    """Evaluates multiclass classifiers.
+
     Parameters
     ----------
     dataset : Dataset object as in Dataloader.py
@@ -348,10 +396,11 @@ class MulticlassEvaluator(Evaluator):
     outer_cv : sklearn split object
         Cross-validation scheme to 'evaluate' the algorithms.
 
-    Attributes 
+    Attributes
     ----------
 
     """
+
     def __init__(
         self,
         dataset,
@@ -365,18 +414,21 @@ class MulticlassEvaluator(Evaluator):
         self.list_of_names = list_of_names
 
         self.list_of_algorithms = []
-        for name in self.list_of_names :
+        for name in self.list_of_names:
             if name == "RFC":
                 self.list_of_algorithms.append(
                     GridSearchCV(
                         RandomForestClassifier(random_state=42),
-                        param_grid={"n_estimators": [25, 50, 100], "max_depth": [3, 5, None]},
+                        param_grid={
+                            "n_estimators": [25, 50, 100],
+                            "max_depth": [3, 5, None],
+                        },
                         scoring="balanced_accuracy",
                         n_jobs=-1,
                         cv=4,
                     )
                 )
-            elif name == "LR" :
+            elif name == "LR":
                 self.list_of_algorithms.append(
                     GridSearchCV(
                         LogisticRegression(
@@ -391,16 +443,14 @@ class MulticlassEvaluator(Evaluator):
                     )
                 )
             elif name == "KNN":
-                if self.dataset.train_together :
-                    metric="euclidean"
-                else :
+                if self.dataset.train_together:
+                    metric = "euclidean"
+                else:
                     metric = "precomputed"
                 self.list_of_algorithms.append(
                     GridSearchCV(
-                        KNeighborsClassifier(
-                            metric=metric
-                        ),
-                        param_grid={"n_neighbors": [2,4,6]},
+                        KNeighborsClassifier(metric=metric),
+                        param_grid={"n_neighbors": [2, 4, 6]},
                         scoring="balanced_accuracy",
                         n_jobs=-1,
                         cv=4,
@@ -408,21 +458,21 @@ class MulticlassEvaluator(Evaluator):
                 )
 
     def _get_full_class_proba(self, pred_proba, model):
-        """" When the training set is only exposed to a subset of target classes,
+        """ " When the training set is only exposed to a subset of target classes,
         the predicted probability for those classes with the multiclass classifier is 0.
         To measure metrics, this needs to be accounted for.
         This function fills up the classes not in the training set.
-        
+
         Parameters
         ----------
         pred_proba : list of n_classes number of np.ndarrays of shape (n_samples, )
             Predicted positive probability values.
         model : sklearn classifier object
             Trained model that gives the pred_proba array.
-        
+
         Returns
         -------
-        new_pred_proba : 
+        new_pred_proba :
             Updated pred_proba array with all classes.
         """
         new_pred_proba = []
@@ -432,25 +482,25 @@ class MulticlassEvaluator(Evaluator):
             else:
                 new_pred_proba.append(pred_proba[0][list(model.classes_).index(i)])
         return np.array(new_pred_proba)
-    
+
     def _processing_before_logging(self, model, X_test, y_yield_test):
         # Should simplify (is common with label ranking )
         pred_proba = model.predict_proba(X_test)
-        if len(pred_proba[0]) < self.dataset.n_rank_component :
+        if len(pred_proba[0]) < self.dataset.n_rank_component:
             pred_proba = self._get_full_class_proba(pred_proba, model)
 
         if self.dataset.component_to_rank == "base":
-            if self.dataset.train_together : 
+            if self.dataset.train_together:
                 y_test_reshape = y_yield_test.reshape(4, 5).T
                 pred_rank_reshape = yield_to_ranking(pred_proba.reshape(4, 5).T)
-            else : 
+            else:
                 y_test_reshape = y_yield_test.flatten()
                 pred_rank_reshape = yield_to_ranking(pred_proba.flatten())
         elif self.dataset.component_to_rank == "sulfonyl_fluoride":
-            if self.dataset.train_together : 
+            if self.dataset.train_together:
                 y_test_reshape = y_yield_test.reshape(4, 5)
                 pred_rank_reshape = yield_to_ranking(pred_proba.reshape(4, 5))
-            else : 
+            else:
                 y_test_reshape = y_yield_test.flatten()
                 pred_rank_reshape = yield_to_ranking(pred_proba.flatten())
         elif self.dataset.component_to_rank == "both":
@@ -458,32 +508,50 @@ class MulticlassEvaluator(Evaluator):
             pred_rank_reshape = yield_to_ranking(pred_proba)
         return y_test_reshape, pred_rank_reshape
 
-    def train_and_evaluate_models(self) :
+    def train_and_evaluate_models(self):
         X = self._load_X()
         y_rank = self.dataset.y_ranking
         y_yield = self.dataset.y_yield
         if (
             type(self.outer_cv) == list
         ):  # When one component is ranked but separating the datasets
-            y = [np.argmin(y_sub_rank, axis=1) for y_sub_rank in y_rank] # transforming ranks into multiclass outputs
+            y = [
+                np.argmin(y_sub_rank, axis=1) for y_sub_rank in y_rank
+            ]  # transforming ranks into multiclass outputs
             self.perf_dict = []
-            for i, (X_array, array, yield_array, cv) in enumerate(zip(X, y, y_yield, self.outer_cv)): # X is not included as it remains the same across different reagents
+            for i, (X_array, array, yield_array, cv) in enumerate(
+                zip(X, y, y_yield, self.outer_cv)
+            ):  # X is not included as it remains the same across different reagents
                 perf_dict = deepcopy(PERFORMANCE_DICT)
-                print("X array shape:", X_array.shape)
+                # print("X array shape:", X_array.shape)
                 # print("ARRAY SHAPE:", array.shape)
-                self._CV_loops(perf_dict, cv, X_array, array, self._processing_before_logging, y_yield=yield_array)
+                self._CV_loops(
+                    perf_dict,
+                    cv,
+                    X_array,
+                    array,
+                    self._processing_before_logging,
+                    y_yield=yield_array,
+                )
                 self.perf_dict.append(perf_dict)
-        else : 
+        else:
             y = np.argmin(y_rank, axis=1)
             perf_dict = deepcopy(PERFORMANCE_DICT)
-            self._CV_loops(perf_dict, self.outer_cv, X, y, self._processing_before_logging, y_yield=y_yield)
+            self._CV_loops(
+                perf_dict,
+                self.outer_cv,
+                X,
+                y,
+                self._processing_before_logging,
+                y_yield=y_yield,
+            )
             self.perf_dict = perf_dict
         return self
 
-#TODO
+
 class MultilabelEvaluator(MulticlassEvaluator):
     """Evaluates multilabel classifiers.
-    
+
     Parameters
     ----------
     dataset : Dataset object as in Dataloader.py
@@ -496,6 +564,7 @@ class MultilabelEvaluator(MulticlassEvaluator):
         Cross-validation scheme to 'evaluate' the algorithms.
 
     """
+
     def __init__(
         self,
         dataset,
@@ -504,21 +573,30 @@ class MultilabelEvaluator(MulticlassEvaluator):
         outer_cv,
         n_rxns=1,
     ):
-        super().__init__(dataset, feature_type, list_of_names, outer_cv, n_rxns,)
-        
+        super().__init__(
+            dataset,
+            feature_type,
+            list_of_names,
+            outer_cv,
+            n_rxns,
+        )
+
         self.list_of_algorithms = []
-        for name in self.list_of_names :
+        for name in self.list_of_names:
             if name == "RFC":
                 self.list_of_algorithms.append(
                     GridSearchCV(
                         RandomForestClassifier(random_state=42),
-                        param_grid={"n_estimators": [25, 50, 100], "max_depth": [3, 5, None]},
+                        param_grid={
+                            "n_estimators": [25, 50, 100],
+                            "max_depth": [3, 5, None],
+                        },
                         scoring="roc_auc",
                         n_jobs=-1,
                         cv=3,
                     )
                 )
-            elif name == "LR" :
+            elif name == "LR":
                 self.list_of_algorithms.append(
                     GridSearchCV(
                         LogisticRegression(
@@ -535,16 +613,14 @@ class MultilabelEvaluator(MulticlassEvaluator):
                     )
                 )
             elif name == "KNN":
-                if self.dataset.train_together :
+                if self.dataset.train_together:
                     metric = "euclidean"
-                else :
+                else:
                     metric = "precomputed"
                 self.list_of_algorithms.append(
                     GridSearchCV(
-                        KNeighborsClassifier(
-                            metric=metric
-                        ),
-                        param_grid={"n_neighbors": [2,4,6]},
+                        KNeighborsClassifier(metric=metric),
+                        param_grid={"n_neighbors": [2, 4, 6]},
                         scoring="roc_auc",
                         n_jobs=-1,
                         cv=4,
@@ -552,43 +628,45 @@ class MultilabelEvaluator(MulticlassEvaluator):
                 )
 
     def _processing_before_logging(self, model, X_test, y_yield_test):
-        if type(model) == list : # Only for multilabel Logistic Regressions
+        if type(model) == list:  # Only for multilabel Logistic Regressions
             pred_proba = []
             for lr in model:
-                if type(lr) == float :
+                if type(lr) == float:
                     if not self.dataset.train_together:
                         pred_proba.append(np.array([[lr]]))
-                    else :
+                    else:
                         pred_proba.append(lr * np.ones((X_test.shape[0], 2)))
-                else :
+                else:
                     pred_proba.append(lr.predict_proba(X_test))
-            print(pred_proba)
-        else :
-            print(X_test)
+            # print(pred_proba)
+        else:
+            # print(X_test)
             pred_proba = model.predict_proba(X_test)
-            print(pred_proba)
+            # print(pred_proba)
         if self.dataset.train_together:
-            pred_proba = np.hstack(tuple(
-                [x[:,1].reshape(-1,1) if x.shape[1]>1 else x.flatten().reshape(-1,1)
-                for x in pred_proba]
-            ))
+            pred_proba = np.hstack(
+                tuple(
+                    [
+                        x[:, 1].reshape(-1, 1)
+                        if x.shape[1] > 1
+                        else x.flatten().reshape(-1, 1)
+                        for x in pred_proba
+                    ]
+                )
+            )
             y_test_reshape = y_yield_test
-        else :
+        else:
             pred_proba = np.array(
-                [
-                    x[0][1] if len(x[0]) == 2 else 1 - x[0][0]
-                    for x in pred_proba
-                ]
+                [x[0][1] if len(x[0]) == 2 else 1 - x[0][0] for x in pred_proba]
             )
             y_test_reshape = y_yield_test.flatten()
-        print(pred_proba.shape)
-        print("Y YIELD TEST SHAPE", y_yield_test.shape)
+        # print(pred_proba.shape)
+        # print("Y YIELD TEST SHAPE", y_yield_test.shape)
         pred_rank_reshape = yield_to_ranking(pred_proba)
-        
-        return y_test_reshape, pred_rank_reshape
-    
 
-    def train_and_evaluate_models(self) :
+        return y_test_reshape, pred_rank_reshape
+
+    def train_and_evaluate_models(self):
         X = self._load_X()
         y_label = self.dataset.y_label
         y_yield = self.dataset.y_yield
@@ -596,20 +674,36 @@ class MultilabelEvaluator(MulticlassEvaluator):
             type(self.outer_cv) == list
         ):  # When one component is ranked but separating the datasets
             self.perf_dict = []
-            for i, (X_array, array, yield_array, cv) in enumerate(zip(X, y_label, y_yield, self.outer_cv)): # X is not included as it remains the same across different reagents
+            for i, (X_array, array, yield_array, cv) in enumerate(
+                zip(X, y_label, y_yield, self.outer_cv)
+            ):  # X is not included as it remains the same across different reagents
                 perf_dict = deepcopy(PERFORMANCE_DICT)
-                print("X array shape:", X_array.shape)
-                print("Y test array", yield_array)
+                # print("X array shape:", X_array.shape)
+                # print("Y test array", yield_array)
                 # print("ARRAY SHAPE:", array.shape)
-                self._CV_loops(perf_dict, cv, X_array, array, self._processing_before_logging, y_yield=yield_array)
+                self._CV_loops(
+                    perf_dict,
+                    cv,
+                    X_array,
+                    array,
+                    self._processing_before_logging,
+                    y_yield=yield_array,
+                )
                 self.perf_dict.append(perf_dict)
-        else : 
+        else:
             perf_dict = deepcopy(PERFORMANCE_DICT)
-            self._CV_loops(perf_dict, self.outer_cv, X, y_label, self._processing_before_logging, y_yield=y_yield)
+            self._CV_loops(
+                perf_dict,
+                self.outer_cv,
+                X,
+                y_label,
+                self._processing_before_logging,
+                y_yield=y_yield,
+            )
             self.perf_dict = perf_dict
         return self
-    
-    
+
+
 class LabelRankingEvaluator(Evaluator):
     """Evaluates multiple label ranking algorithms.
 
@@ -632,6 +726,7 @@ class LabelRankingEvaluator(Evaluator):
         Records of model performances, measured by rr, mrr, regret and kendall tau, over each test compound.
 
     """
+
     def __init__(
         self,
         dataset,
@@ -643,73 +738,77 @@ class LabelRankingEvaluator(Evaluator):
         super().__init__(dataset, n_rxns, outer_cv)
         self.feature_type = feature_type
         self.list_of_names = list_of_names
-    
+
         self.list_of_algorithms = []
-        for name in self.list_of_names :
+        for name in self.list_of_names:
             if name == "RPC":
                 self.list_of_algorithms.append(
-                    RPC(base_learner=LogisticRegression(C=1, solver="liblinear", random_state=42))
+                    RPC(
+                        base_learner=LogisticRegression(
+                            C=1, solver="liblinear", random_state=42
+                        )
+                    )
                 )
-            elif name == "LRT" :
+            elif name == "LRT":
                 self.list_of_algorithms.append(
                     DecisionTreeLabelRanker(
-                        random_state=42, min_samples_split=4 * 2 # might need to change
+                        random_state=42, min_samples_split=4 * 2  # might need to change
                     )
                 )
             elif name == "LRRF":
                 self.list_of_algorithms.append(
-                    LabelRankingRandomForest(
-                        n_estimators=50
-                    )
+                    LabelRankingRandomForest(n_estimators=50)
                 )
             elif name == "IBM":
-                self.list_of_algorithms.append(
-                    IBLR_M(n_neighbors=3, metric="euclidean")
-                )
+                if self.dataset.train_together:
+                    metric = "euclidean"
+                else:
+                    metric = "precomputed"
+                self.list_of_algorithms.append(IBLR_M(n_neighbors=3, metric=metric))
             elif name == "IBPL":
-                self.list_of_algorithms.append(
-                    IBLR_PL(n_neighbors=3, metric="euclidean")
-                )
-
+                if self.dataset.train_together:
+                    metric = "euclidean"
+                else:
+                    metric = "precomputed"
+                self.list_of_algorithms.append(IBLR_PL(n_neighbors=3, metric=metric))
 
     def _processing_before_logging(self, model, X_test, y_yield_test):
-        if type(self.dataset) == Dataloader.DeoxyDataset :
+        if type(self.dataset) == Dataloader.DeoxyDataset:
             if self.dataset.component_to_rank == "base":
-                if self.dataset.train_together : 
+                if self.dataset.train_together:
                     y_test_reshape = y_yield_test.reshape(4, 5).T
                     pred_rank_reshape = model.predict(X_test).reshape(4, 5).T
-                else : 
+                else:
                     y_test_reshape = y_yield_test.flatten()
                     pred_rank_reshape = model.predict(X_test).flatten()
             elif self.dataset.component_to_rank == "sulfonyl_fluoride":
-                if self.dataset.train_together : 
+                if self.dataset.train_together:
                     y_test_reshape = y_yield_test.reshape(4, 5)
                     pred_rank_reshape = model.predict(X_test).reshape(4, 5)
-                else : 
+                else:
                     y_test_reshape = y_yield_test.flatten()
                     pred_rank_reshape = model.predict(X_test).flatten()
             elif self.dataset.component_to_rank == "both":
                 y_test_reshape = y_yield_test
                 pred_rank_reshape = model.predict(X_test)
-        elif type(self.dataset) == Dataloader.InformerDataset :
-            print(y_yield_test.shape)
-            print("XTEST SHAPE", X_test.shape)
+        elif type(self.dataset) == Dataloader.InformerDataset:
+            # print(y_yield_test.shape)
+            # print("XTEST SHAPE", X_test.shape)
             if self.dataset.component_to_rank == "amine_ratio":
-                if self.dataset.train_together :
+                if self.dataset.train_together:
                     y_test_reshape = y_yield_test
                     pred_rank_reshape = model.predict(X_test)
-                else :
+                else:
                     y_test_reshape = y_yield_test.flatten()
                     pred_rank_reshape = model.predict(X_test).flatten()
             elif self.dataset.component_to_rank == "catalyst_ratio":
-                if self.dataset.train_together :
+                if self.dataset.train_together:
                     y_test_reshape = y_yield_test
                     pred_rank_reshape = model.predict(X_test)
-                else :
+                else:
                     y_test_reshape = y_yield_test.flatten()
                     pred_rank_reshape = model.predict(X_test).flatten()
         return y_test_reshape, pred_rank_reshape
-
 
     def train_and_evaluate_models(self):
         X = self._load_X()
@@ -720,17 +819,34 @@ class LabelRankingEvaluator(Evaluator):
         ):  # When one component is ranked but separating the datasets
             self.perf_dict = []
             # print("X", X.shape)
-            for i, (X_array, array, yield_array, cv) in enumerate(zip(X, y, y_yield, self.outer_cv)): # X is not included as it remains the same across different reagents
+            for i, (X_array, array, yield_array, cv) in enumerate(
+                zip(X, y, y_yield, self.outer_cv)
+            ):  # X is not included as it remains the same across different reagents
                 perf_dict = deepcopy(PERFORMANCE_DICT)
-                print("X array shape:", X_array.shape)
+                # print("X array shape:", X_array.shape)
                 # print("ARRAY SHAPE:", array.shape)
-                self._CV_loops(perf_dict, cv, X_array, array, self._processing_before_logging, y_yield=yield_array)
+                self._CV_loops(
+                    perf_dict,
+                    cv,
+                    X_array,
+                    array,
+                    self._processing_before_logging,
+                    y_yield=yield_array,
+                )
                 self.perf_dict.append(perf_dict)
-        else : 
+        else:
             perf_dict = deepcopy(PERFORMANCE_DICT)
-            self._CV_loops(perf_dict, self.outer_cv, X, y, self._processing_before_logging, y_yield=y_yield)
+            self._CV_loops(
+                perf_dict,
+                self.outer_cv,
+                X,
+                y,
+                self._processing_before_logging,
+                y_yield=y_yield,
+            )
             self.perf_dict = perf_dict
         return self
+
 
 class RegressorEvaluator(Evaluator):
     """Evaluates regressors for a specific dataset.
@@ -788,7 +904,7 @@ class RegressorEvaluator(Evaluator):
         if (
             type(self.outer_cv) == list
         ):  # When one component is ranked but separating the datasets
-            print("LIST CV", type(X))
+            # print("LIST CV", type(X))
             self.perf_dict = []
             for i, (array, cv) in enumerate(zip(y, self.outer_cv)):
                 perf_dict = deepcopy(PERFORMANCE_DICT)
@@ -824,7 +940,7 @@ class RegressorEvaluator(Evaluator):
                     model.fit(X_train, y_train)
                     self.models[k].append(model.best_estimator_)
                     self.cv_scores[k].append(model.best_score_)
-                    if type(self.dataset) == Dataloader.DeoxyDataset :
+                    if type(self.dataset) == Dataloader.DeoxyDataset:
                         if self.dataset.component_to_rank == "base":
                             y_test_reshape = y_test.reshape(4, 5).T
                             pred_rank_reshape = yield_to_ranking(
@@ -838,26 +954,50 @@ class RegressorEvaluator(Evaluator):
                         elif self.dataset.component_to_rank == "both":
                             y_test_reshape = y_test
                             pred_rank_reshape = yield_to_ranking(model.predict(X_test))
-                    elif type(self.dataset) == Dataloader.InformerDataset :
+                    elif type(self.dataset) == Dataloader.InformerDataset:
                         assert len(y_test) == 40
-                        if self.dataset.component_to_rank == "amine_ratio" :
-                            y_test_reshape = y_test.reshape(10,4).T
-                            pred_rank_reshape = yield_to_ranking(model.predict(X_test).reshape(10,4).T)
-                        elif self.dataset.component_to_rank == "catalyst_ratio" :
-                            intermediate_array = y_test.reshape(10,4).T
-                            even_rows = [row.reshape(1,-1) for i, row in enumerate(intermediate_array) if i%2==0]
-                            odds_rows = [row.reshape(1,-1) for i, row in enumerate(intermediate_array) if i%2==1]
-                            y_test_reshape = np.vstack((
-                                np.hstack(tuple(even_rows)),
-                                np.hstack(tuple(odds_rows)),
-                            ))
-                            pred_yields = model.predict(X_test).reshape(10,4).T
-                            even_rows = [row.reshape(1,-1) for i, row in enumerate(pred_yields) if i%2==0]
-                            odds_rows = [row.reshape(1,-1) for i, row in enumerate(pred_yields) if i%2==1]
-                            pred_rank_reshape = yield_to_ranking(np.vstack((
-                                np.hstack(tuple(even_rows)),
-                                np.hstack(tuple(odds_rows)),
-                            )))
+                        if self.dataset.component_to_rank == "amine_ratio":
+                            y_test_reshape = y_test.reshape(10, 4).T
+                            pred_rank_reshape = yield_to_ranking(
+                                model.predict(X_test).reshape(10, 4).T
+                            )
+                        elif self.dataset.component_to_rank == "catalyst_ratio":
+                            intermediate_array = y_test.reshape(10, 4).T
+                            even_rows = [
+                                row.reshape(1, -1)
+                                for i, row in enumerate(intermediate_array)
+                                if i % 2 == 0
+                            ]
+                            odds_rows = [
+                                row.reshape(1, -1)
+                                for i, row in enumerate(intermediate_array)
+                                if i % 2 == 1
+                            ]
+                            y_test_reshape = np.vstack(
+                                (
+                                    np.hstack(tuple(even_rows)),
+                                    np.hstack(tuple(odds_rows)),
+                                )
+                            )
+                            pred_yields = model.predict(X_test).reshape(10, 4).T
+                            even_rows = [
+                                row.reshape(1, -1)
+                                for i, row in enumerate(pred_yields)
+                                if i % 2 == 0
+                            ]
+                            odds_rows = [
+                                row.reshape(1, -1)
+                                for i, row in enumerate(pred_yields)
+                                if i % 2 == 1
+                            ]
+                            pred_rank_reshape = yield_to_ranking(
+                                np.vstack(
+                                    (
+                                        np.hstack(tuple(even_rows)),
+                                        np.hstack(tuple(odds_rows)),
+                                    )
+                                )
+                            )
                     self._evaluate_alg(
                         self.perf_dict,
                         y_test_reshape,
