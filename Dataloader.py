@@ -147,7 +147,72 @@ class InformerDataset(Dataset) :
                 if return_X :
                     assert np.all(processed_array[0] == processed_array[1])
                     processed_array = processed_array[0]
-        
+        else :
+            yield_array = self.df.to_numpy()
+            if self.component_to_rank == "amine_ratio":
+                if not return_X :
+                    if not self.train_together :
+                        processed_array = [
+                            yield_array[[y for y in range(yield_array.shape[0]) if y % 4 == x], :].T
+                            for x in range(4)  # 11 x 10
+                        ]
+                    else :
+                        first_amine = []
+                        for i, row in enumerate(yield_array.T) :
+                            first_amine.append([])
+                            for j in range(10) : # 10 chunks of 4-catalyst ratio values
+                                first_amine[i].append(row[4*j:4*(j+1)].reshape(-1,1))                                
+                        processed_array = np.vstack(tuple([np.hstack(tuple(sub_array)) for sub_array in first_amine]))
+
+                else : 
+                    if not self.train_together:
+                        processed_array = [substrate_array_to_process] * 4
+                    else :
+                        processed_array = np.hstack((
+                            np.repeat(substrate_array_to_process, 4, axis=0),
+                            other_array
+                        ))
+            elif self.component_to_rank == "catalyst_ratio":
+                if not return_X : 
+                    if not self.train_together :
+                        processed_array = [
+                            yield_array[
+                                [x for x in range(yield_array.shape[0]) if x % 8 < 4], :
+                            ].T,  # 11 x 20
+                            yield_array[
+                                [x for x in range(yield_array.shape[0]) if x % 8 >= 4], :
+                            ].T,
+                        ]
+                    else :
+                        if not self.train_together:
+                            processed_array = yield_array.reshape()
+                        else :
+                            first_amine = []
+                            second_amine = []
+                            for i, row in enumerate(yield_array.T) :
+                                first_amine.append([])
+                                second_amine.append([])
+                                for j in range(10) : # 10 chunks of 4-catalyst ratio values
+                                    if j % 2 == 0 :
+                                        first_amine[i].append(row[4*j:4*(j+1)].reshape(1,-1))
+                                    else :
+                                        second_amine[i].append(row[4*j:4*(j+1)].reshape(1,-1))
+                            subs_arrays = []
+                            for row_first_amine, row_second_amine in zip(first_amine, second_amine):
+                                subs_arrays.append(np.vstack((
+                                    np.hstack(tuple(row_first_amine)),
+                                    np.hstack(tuple(row_second_amine))
+                                )))
+                            processed_array = np.vstack(tuple(subs_arrays))                                
+                else : 
+                    if not self.train_together :
+                        processed_array = [substrate_array_to_process] * 2
+                    else :
+                        processed_array = np.hstack((
+                            np.repeat(substrate_array_to_process, 2, axis=0),
+                            other_array
+                        ))
+
         return processed_array
 
 
@@ -175,12 +240,25 @@ class InformerDataset(Dataset) :
             for x in self.smiles_list
         ]
         cfp_array = np.vstack(tuple(cfp))
-        if self.train_together :
-            other_array = self.desc
-        elif self.component_to_rank == "amine_ratio"  :
-            other_array = np.hstack((self.desc[:,:3], self.desc[:,-1].reshape(-1,1)))
-        elif self.component_to_rank == "catalyst_ratio"  :
-            other_array = self.desc[:,:4]
+        if self.for_regressor :
+            if self.train_together :
+                other_array = self.desc
+            elif self.component_to_rank == "amine_ratio" :
+                other_array = np.hstack((self.desc[:,:3], self.desc[:,-1].reshape(-1,1)))
+            elif self.component_to_rank == "catalyst_ratio" :
+                other_array = self.desc[:,:4]
+        else :
+            if not self.train_together :
+                other_array = None
+            else :
+                if self.component_to_rank == "amine_ratio" :
+                    other_array = np.repeat(
+                        self.desc[:4,:-1], 11, axis=0
+                    ) #20  match 44
+                elif self.component_to_rank == "catalyst_ratio" :
+                    other_array = np.repeat(np.vstack(tuple(
+                        [row for i, row in enumerate(np.hstack((self.desc[:8,:3], self.desc[:8,-1].reshape(-1,1)))) if i%4==0]
+                    )), 11, axis=0) #10 match 22
         self._X_fp = self._split_arrays(cfp_array, other_array)
         return self._X_fp
     
@@ -201,11 +279,15 @@ class InformerDataset(Dataset) :
     @property
     def y_yield(self):
         self._y_yield = self._split_arrays(None, None, return_X=False)
+        print(len(self._y_yield))
         return self._y_yield
 
     @property
     def y_ranking(self):
-        self._y_ranking = yield_to_ranking(self.y_yield())
+        if type(self.y_yield) == list :
+            self._y_ranking = [yield_to_ranking(x) for x in self.y_yield]
+        elif type(self.y_yield) == np.ndarray :
+            self._y_ranking = yield_to_ranking(self.y_yield)
         return self._y_ranking
 
     @property

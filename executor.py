@@ -150,6 +150,30 @@ def run_informer(parser):
             outer_ps,
         ).train_and_evaluate_models()
         perf_dicts.append(evaluator.perf_dict)
+
+    if (
+        parser.baseline
+        or len(lr_algorithms) > 0
+        or len(classifiers) > 0
+    )    :
+        dataset = InformerDataset(False, label_component, parser.train_together, n_rxns)
+        if parser.train_together:
+            ps = PredefinedSplit(np.repeat(np.arange(11), n_other_component))
+        else:
+            ps = [PredefinedSplit(np.arange(11))] * n_other_component
+        if parser.baseline : 
+            baseline_evaluator = BaselineEvaluator(dataset, n_rxns, ps).train_and_evaluate_models()
+            perf_dicts.append(baseline_evaluator.perf_dict)
+        if len(lr_algorithms) > 0:
+            label_ranking_evaluator = LabelRankingEvaluator(
+                dataset, 
+                parser.feature,
+                n_rxns, 
+                lr_algorithms,
+                ps, 
+            ).train_and_evaluate_models()
+            perf_dicts.append(label_ranking_evaluator.perf_dict)
+
     return perf_dicts
 
 def run_deoxy(parser):

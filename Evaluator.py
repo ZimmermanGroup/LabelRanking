@@ -273,12 +273,13 @@ class BaselineEvaluator(Evaluator):
             self.perf_dict = []
             for i, (array, cv) in enumerate(zip(y, self.outer_cv)):
                 # print(i, array[:3, :])
-                print(cv)
+                print(i, cv)
                 perf_dict = deepcopy(PERFORMANCE_DICT)
                 self._CV_loops(perf_dict, cv, None, array, self._processing_before_logging)
                 self.perf_dict.append(perf_dict)
         else :
             self.perf_dict = PERFORMANCE_DICT
+            print(y.shape)
             self._CV_loops(self.perf_dict, self.outer_cv, None, y, self._processing_before_logging)
         return self
 
@@ -463,7 +464,7 @@ class LabelRankingEvaluator(Evaluator):
         for name in self.list_of_names :
             if name == "RPC":
                 self.list_of_algorithms.append(
-                    RPC(base_learner=LogisticRegression(C=1))
+                    RPC(base_learner=LogisticRegression(C=1, solver="liblinear", random_state=42))
                 )
             elif name == "LRT" :
                 self.list_of_algorithms.append(
@@ -488,23 +489,41 @@ class LabelRankingEvaluator(Evaluator):
 
 
     def _processing_before_logging(self, model, X_test, y_yield_test):
-        if self.dataset.component_to_rank == "base":
-            if self.dataset.train_together : 
-                y_test_reshape = y_yield_test.reshape(4, 5).T
-                pred_rank_reshape = model.predict(X_test).reshape(4, 5).T
-            else : 
-                y_test_reshape = y_yield_test.flatten()
-                pred_rank_reshape = model.predict(X_test).flatten()
-        elif self.dataset.component_to_rank == "sulfonyl_fluoride":
-            if self.dataset.train_together : 
-                y_test_reshape = y_yield_test.reshape(4, 5)
-                pred_rank_reshape = model.predict(X_test).reshape(4, 5)
-            else : 
-                y_test_reshape = y_yield_test.flatten()
-                pred_rank_reshape = model.predict(X_test).flatten()
-        elif self.dataset.component_to_rank == "both":
-            y_test_reshape = y_yield_test
-            pred_rank_reshape = model.predict(X_test)
+        if type(self.dataset) == Dataloader.DeoxyDataset :
+            if self.dataset.component_to_rank == "base":
+                if self.dataset.train_together : 
+                    y_test_reshape = y_yield_test.reshape(4, 5).T
+                    pred_rank_reshape = model.predict(X_test).reshape(4, 5).T
+                else : 
+                    y_test_reshape = y_yield_test.flatten()
+                    pred_rank_reshape = model.predict(X_test).flatten()
+            elif self.dataset.component_to_rank == "sulfonyl_fluoride":
+                if self.dataset.train_together : 
+                    y_test_reshape = y_yield_test.reshape(4, 5)
+                    pred_rank_reshape = model.predict(X_test).reshape(4, 5)
+                else : 
+                    y_test_reshape = y_yield_test.flatten()
+                    pred_rank_reshape = model.predict(X_test).flatten()
+            elif self.dataset.component_to_rank == "both":
+                y_test_reshape = y_yield_test
+                pred_rank_reshape = model.predict(X_test)
+        elif type(self.dataset) == Dataloader.InformerDataset :
+            print(y_yield_test.shape)
+            print("XTEST SHAPE", X_test.shape)
+            if self.dataset.component_to_rank == "amine_ratio":
+                if self.dataset.train_together :
+                    y_test_reshape = y_yield_test
+                    pred_rank_reshape = model.predict(X_test)
+                else :
+                    y_test_reshape = y_yield_test.flatten()
+                    pred_rank_reshape = model.predict(X_test).flatten()
+            elif self.dataset.component_to_rank == "catalyst_ratio":
+                if self.dataset.train_together :
+                    y_test_reshape = y_yield_test
+                    pred_rank_reshape = model.predict(X_test)
+                else :
+                    y_test_reshape = y_yield_test.flatten()
+                    pred_rank_reshape = model.predict(X_test).flatten()
         return y_test_reshape, pred_rank_reshape
 
 
@@ -516,6 +535,7 @@ class LabelRankingEvaluator(Evaluator):
             type(self.outer_cv) == list
         ):  # When one component is ranked but separating the datasets
             self.perf_dict = []
+            # print("X", X.shape)
             for i, (X_array, array, yield_array, cv) in enumerate(zip(X, y, y_yield, self.outer_cv)): # X is not included as it remains the same across different reagents
                 perf_dict = deepcopy(PERFORMANCE_DICT)
                 print("X array shape:", X_array.shape)
@@ -654,8 +674,6 @@ class RegressorEvaluator(Evaluator):
                                 np.hstack(tuple(even_rows)),
                                 np.hstack(tuple(odds_rows)),
                             )))
-
-
                     self._evaluate_alg(
                         self.perf_dict,
                         y_test_reshape,
