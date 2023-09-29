@@ -227,7 +227,26 @@ class Evaluator(ABC):
                 zip(self.list_of_algorithms, self.list_of_names)
             ):
                 if X is not None :
-                    model.fit(X_train, y_train)
+                    if type(model.estimator) == LogisticRegression :
+                        print("Logistic regression detected")
+                        trained_models = []
+                        for i in range(y_train.shape[1]) :
+                            if np.sum(y_train[:, i]) in [0, y_train.shape[0]]:
+                                trained_models.append(float(np.sum(y_train[:,i])/y_train.shape[0]))
+                            elif np.sum(y_train[:, i]) > 3 :
+                                model.fit(X_train, y_train[:, i])
+                                trained_models.append(model)
+                            else :
+                                lr = LogisticRegression(
+                                    penalty="l1",
+                                    solver="liblinear",  # lbfgs doesn't converge
+                                    random_state=42,
+                                )
+                                lr.fit(X_train, y_train[:, i])
+                                trained_models.append(lr)
+                        model = trained_models
+                    else :
+                        model.fit(X_train, y_train)
                 if y_yield is None : 
                     processed_y_test, processed_pred_rank = further_action_before_logging(model, X_test, y_test)
                 else : 
@@ -469,26 +488,21 @@ class MultilabelEvaluator(MulticlassEvaluator):
                     )
                 )
             elif name == "LR" :
-                list_of_lrs = []
-                if type(self.dataset.y_label) == np.ndarray :
-                    for i in range(self.dataset.y_label.shape[1]) :
-                        if len(np.unique(self.dataset.y_label[:,i])) > 1 :
-                            list_of_lrs.append(
-                                LogisticRegression(
-                                    penalty="l1",
-                                    solver="liblinear",  # lbfgs doesn't converge
-                                    random_state=42,
-                                )
-                            )
-                        else :
-                            list_of_lrs.append(None)
-                elif type(self.dataset.y_label) == list :
-                    list_of_lrs.extend([LogisticRegression(
-                                    penalty="l1",
-                                    solver="liblinear",  # lbfgs doesn't converge
-                                    random_state=42,
-                                )]*self.n_rank_component)
-                self.list_of_algorithms.append(list_of_lrs)
+                self.list_of_algorithms.append(
+                    GridSearchCV(
+                        LogisticRegression(
+                            solver="liblinear",  # lbfgs doesn't converge
+                            random_state=42,
+                        ),
+                        param_grid={
+                            "penalty": ["l1", "l2"],
+                            "C": [0.1, 0.3, 1, 3, 10],
+                        },
+                        scoring="roc_auc",
+                        n_jobs=-1,
+                        cv=3,
+                    )
+                )
 
             elif name == "KNN":
                 self.list_of_algorithms.append(
@@ -505,13 +519,24 @@ class MultilabelEvaluator(MulticlassEvaluator):
 
 
     def _processing_before_logging(self, model, X_test, y_yield_test):
-        # Should simplify (is common with label ranking )
-        pred_proba = model.predict_proba(X_test)
-        print(pred_proba)
+        if type(model) == list : # Only for multilabel Logistic Regressions
+            pred_proba = []
+            for lr in model:
+                if type(lr) == float :
+                    if not self.dataset.train_together:
+                        pred_proba.append(np.array([[lr]]))
+                    else :
+                        pred_proba.append(lr * np.ones((X_test.shape[0], 2)))
+                else :
+                    pred_proba.append(lr.predict_proba(X_test))
+            print(pred_proba)
+        else :
+            pred_proba = model.predict_proba(X_test)
+            print(pred_proba)
         if self.dataset.train_together:
             pred_proba = np.hstack(tuple(
                 [x[:,1].reshape(-1,1) if x.shape[1]>1 else x.flatten().reshape(-1,1)
-                  for x in pred_proba]
+                for x in pred_proba]
             ))
             y_test_reshape = y_yield_test
         else :
@@ -549,6 +574,7 @@ class MultilabelEvaluator(MulticlassEvaluator):
             self._CV_loops(perf_dict, self.outer_cv, X, y_label, self._processing_before_logging, y_yield=y_yield)
             self.perf_dict = perf_dict
         return self
+    
     
 class LabelRankingEvaluator(Evaluator):
     """Evaluates multiple label ranking algorithms.
