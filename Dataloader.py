@@ -3,8 +3,8 @@ import pandas as pd
 from copy import deepcopy
 from rdkit import Chem, DataStructs
 from rdkit.Chem import rdFingerprintGenerator
-from abc import ABC, abstractmethod
-
+from abc import ABC
+import joblib
 
 def yield_to_ranking(yield_array):
     """Transforms an array of yield values to their rankings.
@@ -66,6 +66,186 @@ class Dataset(ABC):
         self._X_dist = dists
         # print("DISTARRAY",dists)
         return self._X_dist
+
+
+class NatureDataset(Dataset) :
+    """
+    Prepares arrays from the HTE paper in Nature, 2018.
+    
+    Parameters
+    ----------
+    for_regressor : bool
+        Whether the input will be used for training a regressor.
+    n_rxns : int
+        Number of reactions that we simulate to select and conduct.
+    component_to_rank : str {'amine', 'amide', 'sulfonamide'}
+        Which substrate dataset type to use.
+        Although 'substrate_to_rank' is a better name, using this for consistency.
+    """
+    def __init__(self, for_regressor, component_to_rank, n_rxns=1):
+        super().__init__(for_regressor, n_rxns)
+        self.component_to_rank = component_to_rank
+    
+        # Loading the raw dataset
+        raw_data = pd.read_excel(
+            "datasets/natureHTE/natureHTE.xlsx",
+            sheet_name="Report - Variable Conditions",
+            usecols=["BB SMILES", "Chemistry", "Catalyst", "Base", "Rel. % Conv."],
+        )
+        # Reagent descriptors
+        base_descriptors = pd.read_excel(
+            "datasets/natureHTE/reagent_desc.xlsx", sheet_name="Base"
+        )
+        cat_descriptors = pd.read_excel(
+            "datasets/natureHTE/reagent_desc.xlsx", sheet_name="Catalyst"
+        )
+        self.reagent_data = {}
+        for _, row in base_descriptors.iterrows():
+            self.reagent_data.update({row[0]: row[1:].to_numpy()})
+        for _, row in cat_descriptors.iterrows():
+            self.reagent_data.update({row[0]: row[1:].to_numpy()})
+        # Reaction data by substrate type
+        if self.component_to_rank == "amine":
+            self.df = raw_data[raw_data["Chemistry"] == "Amine"]
+            self.validation_rows = joblib.load(
+                "datasets/natureHTE/nature_amine_inds_to_remove.joblib"
+            )
+        elif self.component_to_rank == "sulfonamide":
+            self.df = raw_data[raw_data["Chemistry"] == "Sulfonamide"].reset_index()
+            self.validation_rows = joblib.load(
+                "datasets/natureHTE/nature_sulfon_inds_to_remove.joblib"
+            )
+        elif self.component_to_rank == "amide":
+            self.df = raw_data[raw_data["Chemistry"] == "Amide"].reset_index()
+            self.validation_rows = joblib.load(
+                "datasets/natureHTE/nature_amide_inds_to_remove.joblib"
+            )
+        self.subs_smiles = self.df["BB SMILES"].unique().tolist()
+        self.cats = self.df["Catalyst"].unique().tolist()
+        self.bases = self.df["Base"].unique().tolist()
+        self.n_rank_component = len(self.cats) * len(self.bases)
+
+    def _split_train_validation(self, array) :
+        """ Splits prepared X or Y array into a training set with more balanced output.
+        
+        Parameters
+        ----------
+        array : np.ndarray of shape (n_rxns or n_substrates, n_features) or (n_rxns or n_substrates,)
+            Array to split.    
+        """
+        if self.for_regressor :
+            train_rows = []
+            val_rows = []
+            for i in range(len(self.df["BB SMILES"].unique())):
+                if i not in self.validation_rows :
+                    train_rows.extend([4*i, 4*i+1, 4*i+2, 4*i+3])
+                if i in self.validation_rows :
+                    val_rows.extend([4*i, 4*i+1, 4*i+2, 4*i+3])
+            array_train = array[train_rows]
+            array_val = array[val_rows]
+        else :
+            array_train = array[[x for x in range(array.shape[0]) if x not in self.validation_rows]]
+            array_val = array[self.validation_rows]
+        return array_train, array_val
+
+    @property
+    def X_fp(self, fpSize=1024, radius=3):
+        """
+        Prepares fingerprint arrays of substrates.
+        For regressors, other descriptors are appended after the substrate fingerprint.
+
+        Parameters
+        ----------
+        fpSize : int
+            Length of the Morgan FP.
+        radius : int
+            Radius of the Morgan FP.
+
+        Returns
+        -------
+        X_fp : np.ndarray of shape (n_rxns, n_features)
+            n_features depends on self.for_regressor
+        """
+        mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
+        if self.for_regressor :
+            fp_arrays = []
+            for i, row in self.df.iterrows():
+                fp_array = mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(row["BB SMILES"])).reshape(1,-1)
+                cat_desc = self.reagent_data[row["Catalyst"]].reshape(1,-1)
+                base_desc = self.reagent_data[row["Base"]].reshape(1,-1)
+                fp_arrays.append(
+                    np.hstack((
+                      fp_array, cat_desc, base_desc  
+                    ))
+                )
+        else :
+            fp_arrays = [
+                mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(x)) for x in self.df["BB SMILES"].unique()
+            ]
+        self._X_fp = self._split_train_validation(np.vstack(tuple(fp_arrays)))[0]
+        return self._X_fp
+
+    @property
+    def X_onehot(self):
+        """ Prepares onehot arrays. """
+        n_subs = len(self.subs_smiles)
+        if self.for_regressor :
+            n_cats = len(self.cats) 
+            n_bases = len(self.bases)
+            array = np.zeros((
+                self.df.shape[0],
+                n_subs+n_cats+n_bases    
+            ))
+            for i, row in self.df.iterrows():
+                array[
+                    [i,i,i], 
+                    [self.subs_smiles.index(row["BB SMILES"]), 
+                     n_subs + self.cats.index(row["Catalyst"]),
+                     n_subs + n_bases + self.bases.index(row["Base"])]
+                ] = 1
+        else :
+            array = np.identity(n_subs)
+        self._X_onehot = self._split_train_validation(array)[0]
+        return self._X_onehot
+
+    @property
+    def y_yield(self):
+        if self.for_regressor :
+            y = self.df["Rel. % Conv."].values.flatten()
+            y[np.argwhere(np.isnan(y))] = 0
+            self._y_yield = self._split_train_validation(y)[0]
+        else : 
+            self._y_yield = self._sort_yield_by_substrate()
+        return self._y_yield
+    
+    def _sort_yield_by_substrate(self):
+        array = np.zeros((
+            len(self.subs_smiles),
+            len(self.cats) * len(self.bases)
+        ))
+        for i, row in self.df.iterrows():
+            y_val = row["Rel. % Conv."]
+            if np.isnan(y_val) :
+                y_val = 0
+            array[
+                self.subs_smiles.index(row["BB SMILES"]),
+                len(self.cats) * self.cats.index(row["Catalyst"]) + self.bases.index(row["Base"])
+            ] = y_val
+        return array
+
+    @property
+    def y_ranking(self) :
+        self._y_ranking = self._split_train_validation(
+            yield_to_ranking(self._sort_yield_by_substrate())
+        )[0]
+        return self._y_ranking
+
+    @property
+    def y_label(self):
+        self._y_label = self._split_train_validation(
+            np.argmax(self._sort_yield_by_substrate(), axis=1)
+        )[0]
+        return self._y_label
 
 
 class InformerDataset(Dataset):

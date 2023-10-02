@@ -9,7 +9,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
-from sklr.tree import DecisionTreeLabelRanker
+# from sklr.tree import DecisionTreeLabelRanker
 
 PERFORMANCE_DICT = {
     "kendall_tau": [],
@@ -375,7 +375,6 @@ class BaselineEvaluator(Evaluator):
                 self.perf_dict.append(perf_dict)
         else:
             self.perf_dict = PERFORMANCE_DICT
-            # print(y.shape)
             self._CV_loops(
                 self.perf_dict, self.outer_cv, None, y, self._processing_before_logging
             )
@@ -414,6 +413,10 @@ class MulticlassEvaluator(Evaluator):
         self.list_of_names = list_of_names
 
         self.list_of_algorithms = []
+        if type(self.dataset) == Dataloader.DeoxyDataset :
+            cv = 4
+        elif type(self.dataset) == Dataloader.NatureDataset :
+            cv = 3
         for name in self.list_of_names:
             if name == "RFC":
                 self.list_of_algorithms.append(
@@ -425,7 +428,7 @@ class MulticlassEvaluator(Evaluator):
                         },
                         scoring="balanced_accuracy",
                         n_jobs=-1,
-                        cv=4,
+                        cv=cv,
                     )
                 )
             elif name == "LR":
@@ -439,7 +442,7 @@ class MulticlassEvaluator(Evaluator):
                         param_grid={"penalty": ["l1", "l2"], "C": [0.1, 0.3, 1, 3, 10]},
                         scoring="balanced_accuracy",
                         n_jobs=-1,
-                        cv=4,
+                        cv=cv,
                     )
                 )
             elif name == "KNN":
@@ -453,7 +456,7 @@ class MulticlassEvaluator(Evaluator):
                         param_grid={"n_neighbors": [2, 4, 6]},
                         scoring="balanced_accuracy",
                         n_jobs=-1,
-                        cv=4,
+                        cv=cv,
                     )
                 )
 
@@ -489,23 +492,28 @@ class MulticlassEvaluator(Evaluator):
         if len(pred_proba[0]) < self.dataset.n_rank_component:
             pred_proba = self._get_full_class_proba(pred_proba, model)
 
-        if self.dataset.component_to_rank == "base":
-            if self.dataset.train_together:
-                y_test_reshape = y_yield_test.reshape(4, 5).T
-                pred_rank_reshape = yield_to_ranking(pred_proba.reshape(4, 5).T)
-            else:
-                y_test_reshape = y_yield_test.flatten()
-                pred_rank_reshape = yield_to_ranking(pred_proba.flatten())
-        elif self.dataset.component_to_rank == "sulfonyl_fluoride":
-            if self.dataset.train_together:
-                y_test_reshape = y_yield_test.reshape(4, 5)
-                pred_rank_reshape = yield_to_ranking(pred_proba.reshape(4, 5))
-            else:
-                y_test_reshape = y_yield_test.flatten()
-                pred_rank_reshape = yield_to_ranking(pred_proba.flatten())
-        elif self.dataset.component_to_rank == "both":
-            y_test_reshape = y_yield_test
-            pred_rank_reshape = yield_to_ranking(pred_proba)
+        if type(self.dataset) in [Dataloader.DeoxyDataset, Dataloader.InformerDataset] :
+            if self.dataset.component_to_rank == "base":
+                if self.dataset.train_together:
+                    y_test_reshape = y_yield_test.reshape(4, 5).T
+                    pred_rank_reshape = yield_to_ranking(pred_proba.reshape(4, 5).T)
+                else:
+                    y_test_reshape = y_yield_test.flatten()
+                    pred_rank_reshape = yield_to_ranking(pred_proba.flatten())
+            elif self.dataset.component_to_rank == "sulfonyl_fluoride":
+                if self.dataset.train_together:
+                    y_test_reshape = y_yield_test.reshape(4, 5)
+                    pred_rank_reshape = yield_to_ranking(pred_proba.reshape(4, 5))
+                else:
+                    y_test_reshape = y_yield_test.flatten()
+                    pred_rank_reshape = yield_to_ranking(pred_proba.flatten())
+            elif self.dataset.component_to_rank == "both":
+                y_test_reshape = y_yield_test
+                pred_rank_reshape = yield_to_ranking(pred_proba)
+        elif type(self.dataset) == Dataloader.NatureDataset :
+            y_test_reshape = y_yield_test.flatten()
+            pred_rank_reshape = yield_to_ranking(pred_proba.flatten())
+
         return y_test_reshape, pred_rank_reshape
 
     def train_and_evaluate_models(self):
@@ -792,8 +800,6 @@ class LabelRankingEvaluator(Evaluator):
                 y_test_reshape = y_yield_test
                 pred_rank_reshape = model.predict(X_test)
         elif type(self.dataset) == Dataloader.InformerDataset:
-            # print(y_yield_test.shape)
-            # print("XTEST SHAPE", X_test.shape)
             if self.dataset.component_to_rank == "amine_ratio":
                 if self.dataset.train_together:
                     y_test_reshape = y_yield_test
@@ -808,6 +814,9 @@ class LabelRankingEvaluator(Evaluator):
                 else:
                     y_test_reshape = y_yield_test.flatten()
                     pred_rank_reshape = model.predict(X_test).flatten()
+        elif type(self.dataset) == Dataloader.NatureDataset :
+            y_test_reshape = y_yield_test.flatten()
+            pred_rank_reshape = model.predict(X_test).flatten()
         return y_test_reshape, pred_rank_reshape
 
     def train_and_evaluate_models(self):
@@ -998,6 +1007,9 @@ class RegressorEvaluator(Evaluator):
                                     )
                                 )
                             )
+                    elif type(self.dataset) == Dataloader.NatureDataset :
+                        y_test_reshape = y_test
+                        pred_rank_reshape = yield_to_ranking(model.predict(X_test))
                     self._evaluate_alg(
                         self.perf_dict,
                         y_test_reshape,

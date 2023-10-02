@@ -20,7 +20,7 @@ def parse_args():
     parser.add_argument(
         "--label_component",
         action="append",
-        help="Which reaction components to consider as 'labels'.",
+        help="Which reaction components to consider as 'labels'. For the natureHTE dataset will use as the substrate to test.",
     )
     parser.add_argument(
         "--train_together",
@@ -76,6 +76,18 @@ def parse_args():
 
 
 def parse_algorithms(parser):
+    """ For label ranking and classifier algorithm, goes through the parser
+    to prepare a list of algorithm names to conduct.
+    
+    Parameters
+    ----------
+    parser: argparse object.
+    
+    Returns
+    -------
+    lr_algorithms, classifiers : list of str
+        Name of algorithms in each class to execute.
+    """
     # Listing Label Ranking algorithms
     lr_algorithms = []
     if parser.rpc:
@@ -97,6 +109,79 @@ def parse_algorithms(parser):
     if parser.knn:
         classifiers.append("KNN")
     return lr_algorithms, classifiers
+
+
+def run_nature(parser):
+    """Runs model evaluations on the natureHTE dataset as defined by the parser.
+    
+    Parameters
+    ----------
+    parser: argparse object.
+    
+    Returns
+    -------
+    perf_dicts : idct
+        key : model type
+        val : list of (or a single) performance dictionaries
+    """
+    # Initialization
+    # This dataset has only four reaction conditions.
+    # So uses the label_component of parser as the dataset to test upon.
+    label_component = parser.label_component[0]
+    lr_algorithms, classifiers = parse_algorithms(parser)
+    n_rxns = 1 # Since there are only 4 reaction condition candidates
+    # Evaluations
+    perf_dicts = []
+    if parser.rfr :
+        dataset = NatureDataset(True, label_component, n_rxns)
+        onehot_array = dataset.X_onehot
+        # print("ONEHOT SHAPE", dataset.X_onehot.shape[0])
+        outer_ps = PredefinedSplit(np.repeat(np.arange(int(onehot_array.shape[0]//4)), 4))
+        inner_ps = PredefinedSplit(np.repeat(np.arange(int(onehot_array.shape[0]//4 - 1)), 4))
+        evaluator = RegressorEvaluator(
+            dataset,
+            parser.feature,
+            n_rxns,
+            [
+                GridSearchCV(
+                    RandomForestRegressor(random_state=42),
+                    param_grid={
+                        "n_estimators": [30, 100, 200],
+                        "max_depth": [5, 10, None],
+                    },
+                    scoring="r2",
+                    n_jobs=-1,
+                    cv=inner_ps,
+                )
+            ],
+            ["RFR"],
+            outer_ps,
+        ).train_and_evaluate_models()
+        perf_dicts.append(evaluator.perf_dict)
+    if parser.baseline or len(lr_algorithms) > 0 or len(classifiers) > 0:
+        dataset = NatureDataset(False, label_component, n_rxns)
+        onehot_array = dataset.X_onehot
+        ps = PredefinedSplit(np.arange(onehot_array.shape[0]))
+        if parser.baseline:
+            baseline_evaluator = BaselineEvaluator(
+                dataset, n_rxns, ps
+            ).train_and_evaluate_models()
+            perf_dicts.append(baseline_evaluator.perf_dict)
+        if len(lr_algorithms) > 0:
+            label_ranking_evaluator = LabelRankingEvaluator(
+                dataset,
+                parser.feature,
+                n_rxns,
+                lr_algorithms,
+                ps,
+            ).train_and_evaluate_models()
+            perf_dicts.append(label_ranking_evaluator.perf_dict)
+        if len(classifiers) > 0:
+            classifier_evaluator = MulticlassEvaluator(
+                dataset, parser.feature, classifiers, ps
+            ).train_and_evaluate_models()
+            perf_dicts.append(classifier_evaluator.perf_dict)
+    return perf_dicts
 
 
 def run_informer(parser):
@@ -353,6 +438,8 @@ def main(parser):
         perf_dicts = run_deoxy(parser)
     elif parser.dataset == "informer":
         perf_dicts = run_informer(parser)
+    elif parser.dataset == "natureHTE":
+        perf_dicts = run_nature(parser)
     parse_perf_dicts(parser.save, perf_dicts)
 
 
