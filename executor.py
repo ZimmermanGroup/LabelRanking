@@ -76,13 +76,13 @@ def parse_args():
 
 
 def parse_algorithms(parser):
-    """ For label ranking and classifier algorithm, goes through the parser
+    """For label ranking and classifier algorithm, goes through the parser
     to prepare a list of algorithm names to conduct.
-    
+
     Parameters
     ----------
     parser: argparse object.
-    
+
     Returns
     -------
     lr_algorithms, classifiers : list of str
@@ -113,11 +113,11 @@ def parse_algorithms(parser):
 
 def run_nature(parser):
     """Runs model evaluations on the natureHTE dataset as defined by the parser.
-    
+
     Parameters
     ----------
     parser: argparse object.
-    
+
     Returns
     -------
     perf_dicts : idct
@@ -129,15 +129,19 @@ def run_nature(parser):
     # So uses the label_component of parser as the dataset to test upon.
     label_component = parser.label_component[0]
     lr_algorithms, classifiers = parse_algorithms(parser)
-    n_rxns = 1 # Since there are only 4 reaction condition candidates
+    n_rxns = 1  # Since there are only 4 reaction condition candidates
     # Evaluations
     perf_dicts = []
-    if parser.rfr :
+    if parser.rfr:
         dataset = NatureDataset(True, label_component, n_rxns)
         onehot_array = dataset.X_onehot
         # print("ONEHOT SHAPE", dataset.X_onehot.shape[0])
-        outer_ps = PredefinedSplit(np.repeat(np.arange(int(onehot_array.shape[0]//4)), 4))
-        inner_ps = PredefinedSplit(np.repeat(np.arange(int(onehot_array.shape[0]//4 - 1)), 4))
+        outer_ps = PredefinedSplit(
+            np.repeat(np.arange(int(onehot_array.shape[0] // 4)), 4)
+        )
+        inner_ps = PredefinedSplit(
+            np.repeat(np.arange(int(onehot_array.shape[0] // 4 - 1)), 4)
+        )
         evaluator = RegressorEvaluator(
             dataset,
             parser.feature,

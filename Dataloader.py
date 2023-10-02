@@ -6,6 +6,7 @@ from rdkit.Chem import rdFingerprintGenerator
 from abc import ABC
 import joblib
 
+
 def yield_to_ranking(yield_array):
     """Transforms an array of yield values to their rankings.
     Currently, treat 0% yields as ties in the last place. (total # of labels)
@@ -68,10 +69,10 @@ class Dataset(ABC):
         return self._X_dist
 
 
-class NatureDataset(Dataset) :
+class NatureDataset(Dataset):
     """
     Prepares arrays from the HTE paper in Nature, 2018.
-    
+
     Parameters
     ----------
     for_regressor : bool
@@ -82,10 +83,11 @@ class NatureDataset(Dataset) :
         Which substrate dataset type to use.
         Although 'substrate_to_rank' is a better name, using this for consistency.
     """
+
     def __init__(self, for_regressor, component_to_rank, n_rxns=1):
         super().__init__(for_regressor, n_rxns)
         self.component_to_rank = component_to_rank
-    
+
         # Loading the raw dataset
         raw_data = pd.read_excel(
             "datasets/natureHTE/natureHTE.xlsx",
@@ -125,26 +127,28 @@ class NatureDataset(Dataset) :
         self.bases = self.df["Base"].unique().tolist()
         self.n_rank_component = len(self.cats) * len(self.bases)
 
-    def _split_train_validation(self, array) :
-        """ Splits prepared X or Y array into a training set with more balanced output.
-        
+    def _split_train_validation(self, array):
+        """Splits prepared X or Y array into a training set with more balanced output.
+
         Parameters
         ----------
         array : np.ndarray of shape (n_rxns or n_substrates, n_features) or (n_rxns or n_substrates,)
-            Array to split.    
+            Array to split.
         """
-        if self.for_regressor :
+        if self.for_regressor:
             train_rows = []
             val_rows = []
             for i in range(len(self.df["BB SMILES"].unique())):
-                if i not in self.validation_rows :
-                    train_rows.extend([4*i, 4*i+1, 4*i+2, 4*i+3])
-                if i in self.validation_rows :
-                    val_rows.extend([4*i, 4*i+1, 4*i+2, 4*i+3])
+                if i not in self.validation_rows:
+                    train_rows.extend([4 * i, 4 * i + 1, 4 * i + 2, 4 * i + 3])
+                if i in self.validation_rows:
+                    val_rows.extend([4 * i, 4 * i + 1, 4 * i + 2, 4 * i + 3])
             array_train = array[train_rows]
             array_val = array[val_rows]
-        else :
-            array_train = array[[x for x in range(array.shape[0]) if x not in self.validation_rows]]
+        else:
+            array_train = array[
+                [x for x in range(array.shape[0]) if x not in self.validation_rows]
+            ]
             array_val = array[self.validation_rows]
         return array_train, array_val
 
@@ -167,74 +171,70 @@ class NatureDataset(Dataset) :
             n_features depends on self.for_regressor
         """
         mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
-        if self.for_regressor :
+        if self.for_regressor:
             fp_arrays = []
             for i, row in self.df.iterrows():
-                fp_array = mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(row["BB SMILES"])).reshape(1,-1)
-                cat_desc = self.reagent_data[row["Catalyst"]].reshape(1,-1)
-                base_desc = self.reagent_data[row["Base"]].reshape(1,-1)
-                fp_arrays.append(
-                    np.hstack((
-                      fp_array, cat_desc, base_desc  
-                    ))
-                )
-        else :
+                fp_array = mfpgen.GetCountFingerprintAsNumPy(
+                    Chem.MolFromSmiles(row["BB SMILES"])
+                ).reshape(1, -1)
+                cat_desc = self.reagent_data[row["Catalyst"]].reshape(1, -1)
+                base_desc = self.reagent_data[row["Base"]].reshape(1, -1)
+                fp_arrays.append(np.hstack((fp_array, cat_desc, base_desc)))
+        else:
             fp_arrays = [
-                mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(x)) for x in self.df["BB SMILES"].unique()
+                mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(x))
+                for x in self.df["BB SMILES"].unique()
             ]
         self._X_fp = self._split_train_validation(np.vstack(tuple(fp_arrays)))[0]
         return self._X_fp
 
     @property
     def X_onehot(self):
-        """ Prepares onehot arrays. """
+        """Prepares onehot arrays."""
         n_subs = len(self.subs_smiles)
-        if self.for_regressor :
-            n_cats = len(self.cats) 
+        if self.for_regressor:
+            n_cats = len(self.cats)
             n_bases = len(self.bases)
-            array = np.zeros((
-                self.df.shape[0],
-                n_subs+n_cats+n_bases    
-            ))
+            array = np.zeros((self.df.shape[0], n_subs + n_cats + n_bases))
             for i, row in self.df.iterrows():
                 array[
-                    [i,i,i], 
-                    [self.subs_smiles.index(row["BB SMILES"]), 
-                     n_subs + self.cats.index(row["Catalyst"]),
-                     n_subs + n_bases + self.bases.index(row["Base"])]
+                    [i, i, i],
+                    [
+                        self.subs_smiles.index(row["BB SMILES"]),
+                        n_subs + self.cats.index(row["Catalyst"]),
+                        n_subs + n_bases + self.bases.index(row["Base"]),
+                    ],
                 ] = 1
-        else :
+        else:
             array = np.identity(n_subs)
         self._X_onehot = self._split_train_validation(array)[0]
         return self._X_onehot
 
     @property
     def y_yield(self):
-        if self.for_regressor :
+        if self.for_regressor:
             y = self.df["Rel. % Conv."].values.flatten()
             y[np.argwhere(np.isnan(y))] = 0
             self._y_yield = self._split_train_validation(y)[0]
-        else : 
+        else:
             self._y_yield = self._sort_yield_by_substrate()
         return self._y_yield
-    
+
     def _sort_yield_by_substrate(self):
-        array = np.zeros((
-            len(self.subs_smiles),
-            len(self.cats) * len(self.bases)
-        ))
+        array = np.zeros((len(self.subs_smiles), len(self.cats) * len(self.bases)))
         for i, row in self.df.iterrows():
             y_val = row["Rel. % Conv."]
-            if np.isnan(y_val) :
+            if np.isnan(y_val):
                 y_val = 0
             array[
                 self.subs_smiles.index(row["BB SMILES"]),
-                len(self.cats) * self.cats.index(row["Catalyst"]) + self.bases.index(row["Base"])
+                len(self.cats) * self.cats.index(row["Catalyst"])
+                + self.bases.index(row["Base"]),
             ] = y_val
         return array
 
     @property
-    def y_ranking(self) :
+    def y_ranking(self):
         self._y_ranking = self._split_train_validation(
             yield_to_ranking(self._sort_yield_by_substrate())
         )[0]

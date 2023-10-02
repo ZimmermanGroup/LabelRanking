@@ -9,6 +9,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
+
 # from sklr.tree import DecisionTreeLabelRanker
 
 PERFORMANCE_DICT = {
@@ -413,9 +414,9 @@ class MulticlassEvaluator(Evaluator):
         self.list_of_names = list_of_names
 
         self.list_of_algorithms = []
-        if type(self.dataset) == Dataloader.DeoxyDataset :
+        if type(self.dataset) == Dataloader.DeoxyDataset:
             cv = 4
-        elif type(self.dataset) == Dataloader.NatureDataset :
+        elif type(self.dataset) == Dataloader.NatureDataset:
             cv = 3
         for name in self.list_of_names:
             if name == "RFC":
@@ -492,7 +493,7 @@ class MulticlassEvaluator(Evaluator):
         if len(pred_proba[0]) < self.dataset.n_rank_component:
             pred_proba = self._get_full_class_proba(pred_proba, model)
 
-        if type(self.dataset) in [Dataloader.DeoxyDataset, Dataloader.InformerDataset] :
+        if type(self.dataset) in [Dataloader.DeoxyDataset, Dataloader.InformerDataset]:
             if self.dataset.component_to_rank == "base":
                 if self.dataset.train_together:
                     y_test_reshape = y_yield_test.reshape(4, 5).T
@@ -510,7 +511,7 @@ class MulticlassEvaluator(Evaluator):
             elif self.dataset.component_to_rank == "both":
                 y_test_reshape = y_yield_test
                 pred_rank_reshape = yield_to_ranking(pred_proba)
-        elif type(self.dataset) == Dataloader.NatureDataset :
+        elif type(self.dataset) == Dataloader.NatureDataset:
             y_test_reshape = y_yield_test.flatten()
             pred_rank_reshape = yield_to_ranking(pred_proba.flatten())
 
@@ -814,7 +815,7 @@ class LabelRankingEvaluator(Evaluator):
                 else:
                     y_test_reshape = y_yield_test.flatten()
                     pred_rank_reshape = model.predict(X_test).flatten()
-        elif type(self.dataset) == Dataloader.NatureDataset :
+        elif type(self.dataset) == Dataloader.NatureDataset:
             y_test_reshape = y_yield_test.flatten()
             pred_rank_reshape = model.predict(X_test).flatten()
         return y_test_reshape, pred_rank_reshape
@@ -1007,7 +1008,7 @@ class RegressorEvaluator(Evaluator):
                                     )
                                 )
                             )
-                    elif type(self.dataset) == Dataloader.NatureDataset :
+                    elif type(self.dataset) == Dataloader.NatureDataset:
                         y_test_reshape = y_test
                         pred_rank_reshape = yield_to_ranking(model.predict(X_test))
                     self._evaluate_alg(
