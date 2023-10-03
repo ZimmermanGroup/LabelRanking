@@ -88,7 +88,6 @@ class RPC:
 
     def predict(self, X):
         """Builds a ranking for the case where labels are fully labeled.
-        TODO: need to incorporate vote aggregator
 
         Parameters
         ----------
@@ -205,7 +204,8 @@ class IBLR_M:
                         assigned_position + 0.5
                     )
 
-                # If there are multiple indices inserted at the same position, we put them in the same order as in pi.
+                # If there are multiple indices inserted at the same position, 
+                # we put them in the same order as in pi.
                 for val in np.unique(sigma_star_i):
                     if len(np.where(sigma_star_i == val)[0]) > 0 and int(val) != val:
                         inds_to_adjust = np.where(sigma_star_i == val)[0]
@@ -454,10 +454,11 @@ class LabelRankingRandomForest:
         X : np.ndarray of shape (n_samples, n_features)
             Input array of descriptors.
         y : np.ndarray of shape (n_samples, n_labels)
-            Output array of continuous yield values.
+            Output array of ranks.
         """
         # Applies TLAC to y array
-        tlac_y = np.argmin(y, axis=1)
+        # print(y)
+        tlac_y = np.nanargmin(y, axis=1)
 
         if self.cross_validator is not None:
             self.cross_validator.fit(X, tlac_y)
@@ -478,10 +479,10 @@ class LabelRankingRandomForest:
         borda_rank_by_tree_and_leaf = {}
         # Gets what training instances arrive at which node
         X_leaves = model.apply(X)
-        for i in range(X_leaves.shape[1]):
+        for i in range(X_leaves.shape[1]): # for each decision tree
             borda_rank_by_tree_and_leaf.update({i: {}})
             for leaf_num in np.unique(X_leaves[:, i]):
-                inds = np.where(X_leaves[:, i] == leaf_num)[0]
+                inds = np.where(X_leaves[:, i] == leaf_num)[0] # which training instance arrives at this leaf node
                 borda_rank = borda_count(np.expand_dims(y[inds, :].T, axis=0))
                 borda_rank_by_tree_and_leaf[i].update({leaf_num: borda_rank})
 
@@ -491,7 +492,6 @@ class LabelRankingRandomForest:
 
     def predict(self, X):
         """Builds a ranking for the case where labels are fully labeled.
-        TODO: need to incorporate vote aggregator
 
         Parameters
         ----------
@@ -506,8 +506,7 @@ class LabelRankingRandomForest:
         collected_borda_array = np.zeros(
             (X_leaves.shape[0], self.n_labels, len(self.model.estimators_))
         )
-        for i in range(X_leaves.shape[0]):
-            row = X_leaves[i, :]
+        for i, row in enumerate(X_leaves):
             for j, leaf_num in enumerate(row):
                 collected_borda_array[i, :, j] = self.borda_by_tree_and_leaf[j][
                     leaf_num

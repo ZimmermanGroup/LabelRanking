@@ -1,169 +1,66 @@
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import KFold, GridSearchCV
-from sklearn.preprocessing import StandardScaler
-from scipy.stats import kendalltau, spearmanr
+from sklearn.model_selection import KFold
+from scipy.stats import kendalltau, mstats
 from label_ranking import *
 from rank_aggregation import *
-from sklr.tree import DecisionTreeLabelRanker
+# from sklr.tree import DecisionTreeLabelRanker
 from tqdm import tqdm
-import joblib
 import argparse
 
-DATASET_INFO = {
-    "name": ["housing", "iris", "stock"],  # "authorship", "elevators", "segment",
-    "num_features": [6, 4, 5],  # 70, 9, 18,
-    "num_labels": [6, 3, 5],  # 4, 9, 7,
-}
-# num instances : 841, 16599, 506, 150, 2310, 950
 N_ITER = 5
 N_CV = 10
-
-lrrf_tau_vals = np.zeros((len(DATASET_INFO["name"]), N_ITER * N_CV))
-rpc_tau_vals = np.zeros((len(DATASET_INFO["name"]), N_ITER * N_CV))
-
+np.random.seed(42)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Select the models to evaluate.")
     parser.add_argument(
-        "--lrrf", default=False, help="Include Label Ranking RF as in Qiu, 2018"
+        "--algorithms", action="append", choices=["lrrf", "rpc", "ibm", "ibpl", "lrt"]
     )
     parser.add_argument(
-        "--rpc",
-        default=False,
-        help="Include Pairwise label ranking as in Hüllermeier, 2008",
-    )
+        "--datasets", action="append", choices=["authorship", "elevators", "housing", "iris", "segment", "stock"]
+    ) # num_instances = 841, 16599, 506, 150, 2310, 950, for each dataset respectively.
     parser.add_argument(
-        "--ibm",
-        default=False,
-        help="Include Instance-based label ranking with Mallows model as in Hüllermeier, 2009",
-    )
-    parser.add_argument(
-        "--ibpl",
-        default=False,
-        help="Include Instance-based label ranking with Plackett=Luce model as in Hüllermeier, 2010",
-    )
-    parser.add_argument(
-        "--boost",
-        action="append",
-        help="Include Boosting with LRT as in Shmueli, 2019.",
-    )
-    parser.add_argument(
-        "--misslabel", default=0, help="Probability of a label missing in percent."
-    )
-    parser.add_argument(
+        "-s",
         "--save",
         action="store_true",
         help="Whether to save resulting scores in an excel file.",
     )
+    parser.add_argument(
+        "--missing_portion",
+        default=0,
+        type=float,
+        help="Probability of each label missing a ranking."
+    )
     args = parser.parse_args()
-    if (
-        args.lrrf is False
-        and args.rpc is False
-        and args.ibm is False
-        and args.ibpl is False
-        and args.boost is False
-    ):
-        parser.error("At least one model is required.")
     return args
 
+def main(parser):
+    model_instances = {
+        "lrrf":LabelRankingRandomForest(),
+        "rpc":RPC(base_learner=LogisticRegression(C=1), cross_validator=None),
+        "ibm":IBLR_M(n_neighbors=5, metric="euclidean"),
+        "ibpl":IBLR_PL(n_neighbors=5)
+    }
+    datasets = {
+        "elevators":[9,9],
+        "iris":[4,3],
+        "segment":[18,7],
+        "housing":[6,6],
+        "authorship":[70,4],
+        "stock":[5,5]
+    }
+    score_dict = {
+        model_name:np.zeros((len(parser.datasets), N_ITER * N_CV)) for model_name in parser.algorithms
+    }
 
-if __name__ == "__main__":
-    parser = parse_args()
-    datasets_info_df = pd.DataFrame(DATASET_INFO)
-
-    score_dict = {}
-    model_names = []
-    models = []
-
-    if parser.lrrf:
-        model_names.append("Label Ranking Random Forest")
-        # models.append(LabelRankingRandomForest(n_estimators=100, max_depth=None))
-        models.append(
-            LabelRankingRandomForest(
-                cross_validator=GridSearchCV(
-                    estimator=RandomForestClassifier(random_state=42),
-                    param_grid={
-                        "n_estimators": [10, 30, 100],
-                        "max_depth": [3, 5, None],
-                    },
-                )
-            )
+    for i, dataset_name in enumerate(parser.datasets) :
+        dataset_df = pd.read_excel(
+            f"datasets/benchmarks/{dataset_name}_dense.xls", header=None
         )
-        score_dict.update(
-            {
-                "Label Ranking Random Forest": np.zeros(
-                    (len(DATASET_INFO["name"]), N_ITER * N_CV)
-                )
-            }
-        )
-    if parser.rpc:
-        model_names.append("Pairwise Comparison")
-        models.append(RPC(base_learner=LogisticRegression(C=1), cross_validator=None))
-        score_dict.update(
-            {
-                "Pairwise Comparison": np.zeros(
-                    (len(DATASET_INFO["name"]), N_ITER * N_CV)
-                )
-            }
-        )
-    if parser.ibm:
-        model_names.append("Instance Based Mallows")
-        models.append(IBLR_M(n_neighbors=5, metric="euclidean"))
-        score_dict.update(
-            {
-                "Instance Based Mallows": np.zeros(
-                    (len(DATASET_INFO["name"]), N_ITER * N_CV)
-                )
-            }
-        )
-    if parser.ibpl:
-        model_names.append("Instance Based Plackett-Luce")
-        models.append(IBLR_PL(n_neighbors=5))
-        score_dict.update(
-            {
-                "Instance Based Plackett-Luce": np.zeros(
-                    (len(DATASET_INFO["name"]), N_ITER * N_CV)
-                )
-            }
-        )
-    if parser.boost:
-        if "lrt" in parser.boost:
-            model_names.append("Boosting with LRT")
-            models.append(
-                BoostLR(DecisionTreeLabelRanker(random_state=42, min_samples_split=8))
-            )
-            score_dict.update(
-                {
-                    "Boosting with LRT": np.zeros(
-                        (len(DATASET_INFO["name"]), N_ITER * N_CV)
-                    )
-                }
-            )
-        if "rpc" in parser.boost:
-            model_names.append("Boosting with RPC")
-            models.append(
-                BoostLR(
-                    RPC(base_learner=LogisticRegression(C=1), cross_validator=None),
-                    max_iter=50,
-                    sample_ratio=1,
-                )
-            )
-            score_dict.update(
-                {
-                    "Boosting with RPC": np.zeros(
-                        (len(DATASET_INFO["name"]), N_ITER * N_CV)
-                    )
-                }
-            )
-
-    for i, row in datasets_info_df.iterrows():
-        dataset = pd.read_excel(
-            f"datasets/benchmarks/{row['name']}_dense.xls", header=None
-        )
-        X = dataset.iloc[:, : row["num_features"]].to_numpy()
-        y = dataset.iloc[:, -1 * row["num_labels"] :].to_numpy()
+        X = dataset_df.iloc[:, : datasets[dataset_name][0]].to_numpy()
+        y = dataset_df.iloc[:, -1 * datasets[dataset_name][1] :].to_numpy()
 
         for j in tqdm(range(N_ITER)):
             kf = KFold(n_splits=N_CV, shuffle=True, random_state=42 + j)
@@ -171,21 +68,34 @@ if __name__ == "__main__":
             for k, (train_index, test_index) in enumerate(kf.split(X)):
                 X_train, X_test = X[train_index], X[test_index]
                 y_train, y_test = y[train_index], y[test_index]
+                if parser.missing_portion > 0 :
+                    y_train_actual = deepcopy(y_train)
+                    random_array = np.random.rand(y_train.shape[0], y_test.shape[1])
+                    y_train_missing = deepcopy(y_train).astype(float)
+                    y_train_missing[np.where(random_array <= parser.missing_portion)] = np.nan
+                    y_train = mstats.rankdata(np.ma.masked_invalid(y_train_missing))
+                    y_train[y_train == 0] = np.nan
+                    # All three shouldn't be nans
+                    for row_ind in np.where(np.sum(np.isnan(y_train), axis=1)==3) :
+                        y_train[row_ind, row_ind%y_train.shape[1]] = y_train_actual[row_ind, row_ind%y_train.shape[1]]
 
-                for l, model in enumerate(models):
+                for l, model_name in enumerate(parser.algorithms):
+                    model = model_instances[model_name]
                     model.fit(X_train, y_train)
                     y_pred = model.predict(X_test)
-                    score_dict[model_names[l]][i, N_CV * j + k] = kendalltau(
+                    score_dict[model_name][i, N_CV * j + k] = kendalltau(
                         y_pred, y_test
                     ).statistic
-
-    average_scores = np.zeros((len(model_names), len(DATASET_INFO["name"])))
+    average_scores = np.zeros((len(parser.algorithms), len(parser.datasets)))
     for k, v in score_dict.items():
-        average_scores[model_names.index(k), :] = np.mean(v, axis=1).flatten()
+        average_scores[parser.algorithms.index(k), :] = np.mean(v, axis=1).flatten()
     score_df = pd.DataFrame(
-        data=average_scores, index=model_names, columns=DATASET_INFO["name"]
+        data=average_scores, index=parser.algorithms, columns=parser.datasets
     )
+    print(score_df)
     if parser.save:
         score_df.to_excel("performance_excels/benchmarks/Benchmark_scores.xlsx")
 
-    print(score_df)
+if __name__ == "__main__":
+    parser = parse_args()
+    main(parser)

@@ -43,38 +43,30 @@ def borda_count(rank_collection):
     rank_collection : np.ndarray of shape (n_samples, n_labels, n_models)
         Predicted rankings of labels from n_models number of different models.
         i.e. the smaller the value, the more preferred.
+        When there are nan values, we assume that the rank vector's values are adjusted to [1, n_non_nan labels]
 
     Returns
     -------
     rank_array : np.ndarray of shape (n_samples, n_labels)
     """
     n_samples, n_labels, n_models = rank_collection.shape
-    score_array = np.zeros((n_samples, n_labels))
+    # score_array = np.zeros((n_samples, n_labels))
     if np.any(np.isnan(rank_collection)):  # For the generalized version
-        for i in range(n_samples):
-            ranks_for_sample = rank_collection[i, :, :]  # shape (n_labels, n_models)
-            score_vector = np.zeros_like(ranks_for_sample)
-            for j in range(n_models):  # for each model
-                ranks_for_sample_by_model = ranks_for_sample[:, j]
-                m_prime = max(ranks_for_sample_by_model)
-                for k, r in enumerate(ranks_for_sample_by_model):
-                    if r != np.nan:
-                        score_vector[k, j] = (
-                            (m_prime + 1 - r) * (n_labels + 1) * (m_prime + 1)
-                        )
-                    else:
-                        score_vector[k, j] = 0.5 * (1 + n_labels)
-            score_array[i] = score_vector
-
+        n_ranked_labels = np.repeat(
+            np.expand_dims(np.sum(np.isnan(rank_collection), axis=1), axis=1),
+            n_labels,
+            axis=1
+        )
+        score_array = np.divide(
+            n_labels * (n_ranked_labels - rank_collection + 1),
+            n_ranked_labels + 1
+        )
+        score_array[np.where(np.isnan(score_array))] = 0.5 * (n_labels + 1) # Move towards the end
+        score_array = np.sum(score_array, axis=2)
     else:  # complete version
-        for i in range(rank_collection.shape[0]):
-            ranks_for_sample = rank_collection[i, :, :]  # shape (n_labels, n_models)
-            score_array[i] = np.sum(
-                ranks_for_sample.shape[0] * np.ones_like(ranks_for_sample)
-                - ranks_for_sample,
-                axis=1,
-            )
-    rank = np.argsort(-score_array, axis=1) + np.ones_like(score_array)
+        score_array = np.sum(rank_collection.shape[1] - rank_collection, axis=2)
+
+    rank = score_array.shape[1] - score_array.argsort(axis=1).argsort(axis=1)
     return rank
 
 
