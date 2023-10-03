@@ -167,9 +167,7 @@ def run_nature(parser):
         onehot_array = dataset.X_onehot
         ps = PredefinedSplit(np.arange(onehot_array.shape[0]))
         if parser.baseline:
-            baseline_evaluator = BaselineEvaluator(
-                dataset, n_rxns, ps
-            )
+            baseline_evaluator = BaselineEvaluator(dataset, n_rxns, ps)
             baseline_CV = baseline_evaluator.train_and_evaluate_models()
             baseline_validation = baseline_evaluator.external_validation()
             # perf_dicts.append(baseline_evaluator.perf_dict)
@@ -395,20 +393,18 @@ def parse_perf_dicts(parser, perf_dicts):
     -------
     None
     """
+
     def print_perf_df(perf_df, model):
         print(
             model,
             round(
-                perf_df[perf_df["model"] == model][
-                    "reciprocal_rank"
-                ].mean(),
+                perf_df[perf_df["model"] == model]["reciprocal_rank"].mean(),
                 3,
             ),
-            round(
-                perf_df[perf_df["model"] == model]["kendall_tau"].mean(), 3
-            ),
+            round(perf_df[perf_df["model"] == model]["kendall_tau"].mean(), 3),
             round(perf_df[perf_df["model"] == model]["regret"].mean(), 3),
         )
+
     save = parser.save
     if type(perf_dicts[0]) == list:
         full_perf_df = []
@@ -424,9 +420,9 @@ def parse_perf_dicts(parser, perf_dicts):
         for model in full_perf_df["model"].unique():
             print_perf_df(full_perf_df, model)
     if save:
-        if len(parser.label_component) == 1 :
+        if len(parser.label_component) == 1:
             comp = parser.label_component[0]
-        elif len(parser.label_component) == 2 :
+        elif len(parser.label_component) == 2:
             comp = "both"
         full_perf_df.to_excel(
             f"performance_excels/{parser.dataset}/{parser.feature}_{comp}_{parser.train_together}.xlsx"

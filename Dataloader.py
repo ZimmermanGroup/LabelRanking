@@ -126,7 +126,7 @@ class NatureDataset(Dataset):
         self.cats = self.df["Catalyst"].unique().tolist()
         self.bases = self.df["Base"].unique().tolist()
         self.n_rank_component = len(self.cats) * len(self.bases)
-        self.train_together = False # for kNN
+        self.train_together = False  # for kNN
 
     def _split_train_validation(self, array):
         """Splits prepared X or Y array into a training set with more balanced output.
@@ -186,7 +186,9 @@ class NatureDataset(Dataset):
                 mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(x))
                 for x in self.df["BB SMILES"].unique()
             ]
-        self._X_fp, self.X_valid = self._split_train_validation(np.vstack(tuple(fp_arrays)))
+        self._X_fp, self.X_valid = self._split_train_validation(
+            np.vstack(tuple(fp_arrays))
+        )
         return self._X_fp
 
     @property
@@ -215,8 +217,16 @@ class NatureDataset(Dataset):
     def X_dist(self):
         """Tanimoto distances between the substrates, used for neighbor based models."""
         mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
-        train_cfp = [mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for i, x in enumerate(self.smiles_list) if i not in self.validation_rows]
-        valid_cfp = [mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for i, x in enumerate(self.smiles_list) if i in self.validation_rows]
+        train_cfp = [
+            mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x))
+            for i, x in enumerate(self.smiles_list)
+            if i not in self.validation_rows
+        ]
+        valid_cfp = [
+            mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x))
+            for i, x in enumerate(self.smiles_list)
+            if i in self.validation_rows
+        ]
         train_dists = np.zeros((len(train_cfp), len(train_cfp)))
         valid_dists = np.zeros((len(valid_cfp), len(train_cfp)))
         for i in range(1, len(train_dists)):
@@ -227,12 +237,12 @@ class NatureDataset(Dataset):
                 train_cfp[i], valid_cfp
             )
             train_dists[i, :i] = np.array([1 - x for x in similarities_btw_train])
-            valid_dists[:, i] = np.array([1-x for x in test_to_train_sim])
+            valid_dists[:, i] = np.array([1 - x for x in test_to_train_sim])
         train_dists += train_dists.T
         self._X_dist = train_dists
         self.X_valid = valid_dists
         return self._X_dist
-                
+
     @property
     def y_yield(self):
         if self.for_regressor:
@@ -240,11 +250,13 @@ class NatureDataset(Dataset):
             y[np.argwhere(np.isnan(y))] = 0
             self._y_yield, self.y_valid = self._split_train_validation(y)
         else:
-            self._y_yield, self.y_valid = self._split_train_validation(self._sort_yield_by_substrate())
+            self._y_yield, self.y_valid = self._split_train_validation(
+                self._sort_yield_by_substrate()
+            )
         return self._y_yield
 
     def _sort_yield_by_substrate(self):
-        """ Prepares an array of yields where each row corresponds to a substrate and column corresponds to reactions conditions. """
+        """Prepares an array of yields where each row corresponds to a substrate and column corresponds to reactions conditions."""
         array = np.zeros((len(self.smiles_list), len(self.cats) * len(self.bases)))
         for i, row in self.df.iterrows():
             y_val = row["Rel. % Conv."]
@@ -270,7 +282,7 @@ class NatureDataset(Dataset):
             np.argmax(self._sort_yield_by_substrate(), axis=1)
         )
         return self._y_label
-    
+
 
 class InformerDataset(Dataset):
     """

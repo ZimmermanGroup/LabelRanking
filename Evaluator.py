@@ -9,6 +9,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
+
 # from sklr.tree import DecisionTreeLabelRanker
 
 PERFORMANCE_DICT = {
@@ -20,6 +21,7 @@ PERFORMANCE_DICT = {
     "model": [],
 }
 np.random.seed(42)
+
 
 class Evaluator(ABC):
     """Base class for evaluators for various types of algorithsm.
@@ -270,8 +272,8 @@ class Evaluator(ABC):
                         and type(self) == MultilabelEvaluator
                     ):
                         trained_models = []
-                        if len(y_train.shape) == 1 :
-                            y_train = y_train.reshape(-1,1)
+                        if len(y_train.shape) == 1:
+                            y_train = y_train.reshape(-1, 1)
                         for i in range(y_train.shape[1]):
                             if np.sum(y_train[:, i]) in [0, y_train.shape[0]]:
                                 trained_models.append(
@@ -389,7 +391,13 @@ class BaselineEvaluator(Evaluator):
         self.valid_dict = deepcopy(PERFORMANCE_DICT)
         y_train = self.dataset.y_yield
         y_valid = self.dataset.y_valid
-        self._evaluate_alg(self.valid_dict, y_valid, np.tile(yield_to_ranking(np.mean(y_train, axis=0)), (y_valid.shape[0], 1)), "Validation", "Baseline")
+        self._evaluate_alg(
+            self.valid_dict,
+            y_valid,
+            np.tile(yield_to_ranking(np.mean(y_train, axis=0)), (y_valid.shape[0], 1)),
+            "Validation",
+            "Baseline",
+        )
         return self
 
 
@@ -579,11 +587,11 @@ class MulticlassEvaluator(Evaluator):
         for b, (model, model_name) in enumerate(
             zip(self.list_of_algorithms, self.list_of_names)
         ):
-            if type(model.estimator) != KNeighborsClassifier :
+            if type(model.estimator) != KNeighborsClassifier:
                 X_train = self._load_X()
                 X_valid = self.dataset.X_valid
                 model.fit(X_train, y_rank_train)
-            else :
+            else:
                 X_train = self.dataset.X_dist
                 X_valid = self.dataset.X_valid
                 model.fit(X_train, y_rank_train)
@@ -599,7 +607,7 @@ class MulticlassEvaluator(Evaluator):
             )
         return self
 
-            
+
 class MultilabelEvaluator(MulticlassEvaluator):
     """Evaluates multilabel classifiers.
 
@@ -962,7 +970,7 @@ class RegressorEvaluator(Evaluator):
         self.feature_type = feature_type
         self.list_of_algorithms = list_of_algorithms
         self.list_of_names = list_of_names
-    
+
     def _processing_before_logging(self, model, X_test, y_test):
         if type(self.dataset) == dataloader.DeoxyDataset:
             if self.dataset.component_to_rank == "base":
