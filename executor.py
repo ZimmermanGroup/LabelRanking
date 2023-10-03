@@ -3,8 +3,8 @@ from abc import ABC
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
 
-from Dataloader import *
-from Evaluator import *
+from dataloader import *
+from evaluator import *
 
 
 def parse_args():
@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument(
         "--train_together",
         action=argparse.BooleanOptionalAction,
-        help="Whether the non-label reaction component should be treated altogether or as separate datasets.",
+        help="Whether the non-label reaction component should be treated altogether or as separate datasets. Is not utilized in the natureHTE datset.",
     )
     parser.add_argument(
         "--rfr", action="store_true", help="Include Random Forest Regressor."
@@ -169,8 +169,11 @@ def run_nature(parser):
         if parser.baseline:
             baseline_evaluator = BaselineEvaluator(
                 dataset, n_rxns, ps
-            ).train_and_evaluate_models()
-            perf_dicts.append(baseline_evaluator.perf_dict)
+            )
+            baseline_CV = baseline_evaluator.train_and_evaluate_models()
+            baseline_validation = baseline_evaluator.external_validation()
+            # perf_dicts.append(baseline_evaluator.perf_dict)
+            perf_dicts.append(baseline_CV.perf_dict)
         if len(lr_algorithms) > 0:
             label_ranking_evaluator = LabelRankingEvaluator(
                 dataset,
@@ -178,12 +181,16 @@ def run_nature(parser):
                 n_rxns,
                 lr_algorithms,
                 ps,
-            ).train_and_evaluate_models()
+            )
+            label_ranking_CV = label_ranking_evaluator.train_and_evaluate_models()
+            label_ranking_validation = label_ranking_evaluator.external_validation()
             perf_dicts.append(label_ranking_evaluator.perf_dict)
         if len(classifiers) > 0:
             classifier_evaluator = MulticlassEvaluator(
                 dataset, parser.feature, classifiers, ps
-            ).train_and_evaluate_models()
+            )
+            classifier_CV = classifier_evaluator.train_and_evaluate_models()
+            classifier_validation = classifier_evaluator.external_validation()
             perf_dicts.append(classifier_evaluator.perf_dict)
     return perf_dicts
 
@@ -372,7 +379,7 @@ def run_deoxy(parser):
     return perf_dicts
 
 
-def parse_perf_dicts(save, perf_dicts):
+def parse_perf_dicts(parser, perf_dicts):
     """
     Process the performance dicts.
 
@@ -388,53 +395,42 @@ def parse_perf_dicts(save, perf_dicts):
     -------
     None
     """
+    def print_perf_df(perf_df, model):
+        print(
+            model,
+            round(
+                perf_df[perf_df["model"] == model][
+                    "reciprocal_rank"
+                ].mean(),
+                3,
+            ),
+            round(
+                perf_df[perf_df["model"] == model]["kendall_tau"].mean(), 3
+            ),
+            round(perf_df[perf_df["model"] == model]["regret"].mean(), 3),
+        )
+    save = parser.save
     if type(perf_dicts[0]) == list:
-        full_perf_dict = []
+        full_perf_df = []
         for i in range(len(perf_dicts[0])):
             sub_perf_dict = pd.concat([pd.DataFrame(x[i]) for x in perf_dicts])
-            full_perf_dict.append(sub_perf_dict)
-        if not save:
-            for perf_df in full_perf_dict:
-                for model in perf_df["model"].unique():
-                    print(
-                        model,
-                        round(
-                            perf_df[perf_df["model"] == model][
-                                "reciprocal_rank"
-                            ].mean(),
-                            3,
-                        ),
-                        round(
-                            perf_df[perf_df["model"] == model]["kendall_tau"].mean(), 3
-                        ),
-                        round(perf_df[perf_df["model"] == model]["regret"].mean(), 3),
-                    )
-
+            full_perf_df.append(sub_perf_dict)
+        for perf_df in full_perf_df:
+            for model in perf_df["model"].unique():
+                print_perf_df(perf_df, model)
+        full_perf_df = pd.concat(full_perf_df)
     elif type(perf_dicts[0]) == dict:
-        full_perf_dict = pd.concat([pd.DataFrame(x) for x in perf_dicts])
-        if not save:
-            for model in full_perf_dict["model"].unique():
-                print(
-                    model,
-                    round(
-                        full_perf_dict[full_perf_dict["model"] == model][
-                            "reciprocal_rank"
-                        ].mean(),
-                        3,
-                    ),
-                    round(
-                        full_perf_dict[full_perf_dict["model"] == model][
-                            "kendall_tau"
-                        ].mean(),
-                        3,
-                    ),
-                    round(
-                        full_perf_dict[full_perf_dict["model"] == model][
-                            "regret"
-                        ].mean(),
-                        3,
-                    ),
-                )
+        full_perf_df = pd.concat([pd.DataFrame(x) for x in perf_dicts])
+        for model in full_perf_df["model"].unique():
+            print_perf_df(full_perf_df, model)
+    if save:
+        if len(parser.label_component) == 1 :
+            comp = parser.label_component[0]
+        elif len(parser.label_component) == 2 :
+            comp = "both"
+        full_perf_df.to_excel(
+            f"performance_excels/{parser.dataset}/{parser.feature}_{comp}_{parser.train_together}.xlsx"
+        )
 
 
 def main(parser):
@@ -444,7 +440,7 @@ def main(parser):
         perf_dicts = run_informer(parser)
     elif parser.dataset == "natureHTE":
         perf_dicts = run_nature(parser)
-    parse_perf_dicts(parser.save, perf_dicts)
+    parse_perf_dicts(parser, perf_dicts)
 
 
 if __name__ == "__main__":
