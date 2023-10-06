@@ -52,21 +52,25 @@ def borda_count(rank_collection, weights=None):
     rank_array : np.ndarray of shape (n_samples, n_labels)
     """
     n_samples, n_labels, n_models = rank_collection.shape
-    if np.any(np.isnan(rank_collection)):  # For the generalized version with incomplete labels
+    if np.any(
+        np.isnan(rank_collection)
+    ):  # For the generalized version with incomplete labels
         n_ranked_labels = np.tile(
             np.expand_dims(np.sum(np.isnan(rank_collection), axis=1), axis=1),
-            (1,n_labels,1)
+            (1, n_labels, 1),
         )
         score_array = np.divide(
-            (n_labels+1) * (n_ranked_labels - rank_collection + 1),
-            n_ranked_labels + 1
-        ) # Scores for ranked labels
-        score_array[np.where(np.isnan(score_array))] = 0.5 * (n_labels + 1) # Scores for Incomplete labels
-        if weights is None :
+            (n_labels + 1) * (n_ranked_labels - rank_collection + 1),
+            n_ranked_labels + 1,
+        )  # Scores for ranked labels
+        score_array[np.where(np.isnan(score_array))] = 0.5 * (
+            n_labels + 1
+        )  # Scores for Incomplete labels
+        if weights is None:
             score_array = np.sum(score_array, axis=2)
-        else :
+        else:
             score_by_sample = []
-            for i in range(score_array.shape[0]) :
+            for i in range(score_array.shape[0]):
                 score_by_sample.append(
                     np.dot(score_array[i], weights[i]) / np.sum(weights[i])
                 )

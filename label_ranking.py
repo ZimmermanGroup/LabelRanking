@@ -164,7 +164,9 @@ class IBLR_M:
         sigma_star : np.ndarray of shape (n_neighbors, n_labels)
             Consistently extended rankings of neighbors.
         """
-        sigma_star = -1 * np.ones_like(bold_sigma) # Contribution of each neighbor to prediction
+        sigma_star = -1 * np.ones_like(
+            bold_sigma
+        )  # Contribution of each neighbor to prediction
         for a, sigma in enumerate(bold_sigma):
             # For incomplete datasets
             if len(np.where(np.isnan(sigma))[0]) > 0:
@@ -180,20 +182,14 @@ class IBLR_M:
                         len(ranked_labels) + 1
                     ):  # for k in ranked_labels:  # Going through all ranked labels
                         labels_before_j = np.where(sigma <= k)[0]
-                        pi_k_greater_than_pi_i = np.where(
-                            pi_hat > pi_hat[empty_label]
-                        )
+                        pi_k_greater_than_pi_i = np.where(pi_hat > pi_hat[empty_label])
 
                         labels_after_j = np.where(sigma > k)[0]
-                        pi_k_smaller_than_pi_i = np.where(
-                            pi_hat < pi_hat[empty_label]
-                        )
+                        pi_k_smaller_than_pi_i = np.where(pi_hat < pi_hat[empty_label])
 
                         num_discordant = len(
                             np.intersect1d(labels_before_j, pi_k_greater_than_pi_i)
-                        ) + len(
-                            np.intersect1d(labels_after_j, pi_k_smaller_than_pi_i)
-                        )
+                        ) + len(np.intersect1d(labels_after_j, pi_k_smaller_than_pi_i))
                         if num_discordant < min_discordant_num:
                             min_discordant_num = num_discordant
                             position_to_assign = k
@@ -204,7 +200,7 @@ class IBLR_M:
                     sigma_star_i[empty_labels[empty_label_ind]] = (
                         assigned_position + 0.5
                     )
-                # If there are multiple indices inserted at the same position, 
+                # If there are multiple indices inserted at the same position,
                 # we put them in the same order as in pi.
                 for val in np.unique(sigma_star_i):
                     if len(np.where(sigma_star_i == val)[0]) > 1 and int(val) != val:
@@ -244,8 +240,8 @@ class IBLR_M:
         )
         dist_diffs = np.max(neighbor_dists, axis=1) - np.min(neighbor_dists, axis=1)
         neighbor_dist_weights = np.divide(
-            np.max(neighbor_dists, axis=1).reshape(-1,1) - neighbor_dists,
-            np.tile(dist_diffs.reshape(-1,1), (1, neighbor_dists.shape[1]))
+            np.max(neighbor_dists, axis=1).reshape(-1, 1) - neighbor_dists,
+            np.tile(dist_diffs.reshape(-1, 1), (1, neighbor_dists.shape[1])),
         )
         # Line 2 : get neighbor rankings
         neighbor_rankings = np.zeros(
@@ -254,15 +250,14 @@ class IBLR_M:
         for i, row in enumerate(neighbor_inds):
             neighbor_rankings[i, :, :] = self.y_train[row, :].T
         # Number of labeled portions for each neighbor
-        neighbor_sampled_weights = np.sum(
-            ~np.isnan(neighbor_rankings), axis=1
-        ) / self.y_train.shape[1]
-        neighbor_weights = np.multiply(
-            neighbor_dist_weights,
-            neighbor_sampled_weights
+        neighbor_sampled_weights = (
+            np.sum(~np.isnan(neighbor_rankings), axis=1) / self.y_train.shape[1]
         )
+        neighbor_weights = np.multiply(neighbor_dist_weights, neighbor_sampled_weights)
         # Line 3 : get generalized Borda count from neighbor rankings
-        pi_hat = borda_count(neighbor_rankings, neighbor_weights)  # shape n_samples, n_labels
+        pi_hat = borda_count(
+            neighbor_rankings, neighbor_weights
+        )  # shape n_samples, n_labels
         pi = np.zeros_like(pi_hat)
         count = 0
         while np.any(pi != pi_hat):
@@ -276,9 +271,7 @@ class IBLR_M:
                 )
                 all_sigma_star[i, :, :] = sigma_star_by_instance.T
             # Line 9
-            pi = borda_count(
-                all_sigma_star
-            ) 
+            pi = borda_count(all_sigma_star)
             count += 1
         return pi_hat
 
@@ -380,12 +373,12 @@ class IBLR_PL:
             # Now for the denominator in gamma(i), we need to add up all g(j, r(i,j)) for nonzero r over all neighbors.
             for i in range(M):
                 col = rankings[:, i].flatten()
-                if type(col[0]) != int :
-                    col_vals = [int(x)-1 for x in col[~np.isnan(col)]]
-                else : 
+                if type(col[0]) != int:
+                    col_vals = [int(x) - 1 for x in col[~np.isnan(col)]]
+                else:
                     col_vals = col[~np.isnan(col)] - 1
                 denominator[i] = np.sum(
-                    g[np.where(~np.isnan(col))[0], col_vals] #col[~np.isnan(col)] - 1
+                    g[np.where(~np.isnan(col))[0], col_vals]  # col[~np.isnan(col)] - 1
                 )
             new_gamma = np.divide(w, denominator)
             dgamma = new_gamma - gamma
@@ -474,10 +467,12 @@ class LabelRankingRandomForest:
         borda_rank_by_tree_and_leaf = {}
         # Gets what training instances arrive at which node
         X_leaves = model.apply(X)
-        for i in range(X_leaves.shape[1]): # for each decision tree
+        for i in range(X_leaves.shape[1]):  # for each decision tree
             borda_rank_by_tree_and_leaf.update({i: {}})
             for leaf_num in np.unique(X_leaves[:, i]):
-                inds = np.where(X_leaves[:, i] == leaf_num)[0] # which training instance arrives at this leaf node
+                inds = np.where(X_leaves[:, i] == leaf_num)[
+                    0
+                ]  # which training instance arrives at this leaf node
                 borda_rank = borda_count(np.expand_dims(y[inds, :].T, axis=0))
                 borda_rank_by_tree_and_leaf[i].update({leaf_num: borda_rank})
 

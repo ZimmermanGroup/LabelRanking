@@ -13,14 +13,17 @@ N_ITER = 5
 N_CV = 10
 np.random.seed(42)
 
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Select the models to evaluate.")
     parser.add_argument(
         "--algorithms", action="append", choices=["lrrf", "rpc", "ibm", "ibpl", "lrt"]
     )
     parser.add_argument(
-        "--datasets", action="append", choices=["authorship", "elevators", "housing", "iris", "segment", "stock"]
-    ) # num_instances = 841, 16599, 506, 150, 2310, 950, for each dataset respectively.
+        "--datasets",
+        action="append",
+        choices=["authorship", "elevators", "housing", "iris", "segment", "stock"],
+    )  # num_instances = 841, 16599, 506, 150, 2310, 950, for each dataset respectively.
     parser.add_argument(
         "-s",
         "--save",
@@ -31,32 +34,34 @@ def parse_args():
         "--missing_portion",
         default=0,
         type=float,
-        help="Probability of each label missing a ranking."
+        help="Probability of each label missing a ranking.",
     )
     args = parser.parse_args()
     return args
 
+
 def main(parser):
     model_instances = {
-        "lrrf":LabelRankingRandomForest(),
-        "rpc":RPC(base_learner=LogisticRegression(C=1), cross_validator=None),
-        "ibm":IBLR_M(n_neighbors=30, metric="euclidean"),
-        "ibpl":IBLR_PL(n_neighbors=20),
-        "lrt":DecisionTreeLabelRanker()
+        "lrrf": LabelRankingRandomForest(),
+        "rpc": RPC(base_learner=LogisticRegression(C=1), cross_validator=None),
+        "ibm": IBLR_M(n_neighbors=30, metric="euclidean"),
+        "ibpl": IBLR_PL(n_neighbors=20),
+        "lrt": DecisionTreeLabelRanker(),
     }
     datasets = {
-        "elevators":[9,9],
-        "iris":[4,3],
-        "segment":[18,7],
-        "housing":[6,6],
-        "authorship":[70,4],
-        "stock":[5,5]
+        "elevators": [9, 9],
+        "iris": [4, 3],
+        "segment": [18, 7],
+        "housing": [6, 6],
+        "authorship": [70, 4],
+        "stock": [5, 5],
     }
     score_dict = {
-        model_name:np.zeros((len(parser.datasets), N_ITER * N_CV)) for model_name in parser.algorithms
+        model_name: np.zeros((len(parser.datasets), N_ITER * N_CV))
+        for model_name in parser.algorithms
     }
 
-    for i, dataset_name in enumerate(parser.datasets) :
+    for i, dataset_name in enumerate(parser.datasets):
         dataset_df = pd.read_excel(
             f"datasets/benchmarks/{dataset_name}_dense.xls", header=None
         )
@@ -68,17 +73,26 @@ def main(parser):
             for k, (train_index, test_index) in enumerate(kf.split(X)):
                 X_train, X_test = X[train_index], X[test_index]
                 y_train, y_test = y[train_index], y[test_index]
-                if parser.missing_portion > 0 :
+                if parser.missing_portion > 0:
                     y_train_actual = deepcopy(y_train)
                     random_array = np.random.rand(y_train.shape[0], y_test.shape[1])
                     y_train_missing = deepcopy(y_train).astype(float)
-                    y_train_missing[np.where(random_array <= parser.missing_portion)] = np.nan
+                    y_train_missing[
+                        np.where(random_array <= parser.missing_portion)
+                    ] = np.nan
                     # All three shouldn't be nans
-                    for row_ind in np.where(np.sum(np.isnan(y_train_missing), axis=1)==y_train_missing.shape[1]) :
-                        y_train_missing[row_ind, row_ind%y_train_missing.shape[1]] = y_train_actual[row_ind, row_ind%y_train_missing.shape[1]]
-                    y_train = mstats.rankdata(np.ma.masked_invalid(y_train_missing), axis=1)
+                    for row_ind in np.where(
+                        np.sum(np.isnan(y_train_missing), axis=1)
+                        == y_train_missing.shape[1]
+                    ):
+                        y_train_missing[
+                            row_ind, row_ind % y_train_missing.shape[1]
+                        ] = y_train_actual[row_ind, row_ind % y_train_missing.shape[1]]
+                    y_train = mstats.rankdata(
+                        np.ma.masked_invalid(y_train_missing), axis=1
+                    )
                     y_train[y_train == 0] = np.nan
-                    
+
                 for l, model_name in enumerate(parser.algorithms):
                     model = model_instances[model_name]
                     model.fit(X_train, y_train)
@@ -95,6 +109,7 @@ def main(parser):
     print(score_df)
     if parser.save:
         score_df.to_excel("performance_excels/benchmarks/Benchmark_scores.xlsx")
+
 
 if __name__ == "__main__":
     parser = parse_args()
