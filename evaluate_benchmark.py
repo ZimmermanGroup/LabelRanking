@@ -41,7 +41,7 @@ def main(parser):
         "lrrf":LabelRankingRandomForest(),
         "rpc":RPC(base_learner=LogisticRegression(C=1), cross_validator=None),
         "ibm":IBLR_M(n_neighbors=30, metric="euclidean"),
-        "ibpl":IBLR_PL(n_neighbors=5),
+        "ibpl":IBLR_PL(n_neighbors=20),
         "lrt":DecisionTreeLabelRanker()
     }
     datasets = {

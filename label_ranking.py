@@ -380,8 +380,12 @@ class IBLR_PL:
             # Now for the denominator in gamma(i), we need to add up all g(j, r(i,j)) for nonzero r over all neighbors.
             for i in range(M):
                 col = rankings[:, i].flatten()
+                if type(col[0]) != int :
+                    col_vals = [int(x)-1 for x in col[~np.isnan(col)]]
+                else : 
+                    col_vals = col[~np.isnan(col)] - 1
                 denominator[i] = np.sum(
-                    g[np.where(~np.isnan(col))[0], col[~np.isnan(col)] - 1]
+                    g[np.where(~np.isnan(col))[0], col_vals] #col[~np.isnan(col)] - 1
                 )
             new_gamma = np.divide(w, denominator)
             dgamma = new_gamma - gamma
