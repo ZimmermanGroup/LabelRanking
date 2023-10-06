@@ -5,7 +5,7 @@ from scipy.optimize import line_search
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neighbors import NearestNeighbors
 from sklearn.utils import resample
-from scipy.stats import kendalltau
+from scipy.stats import kendalltau, mstats
 from math import log
 from rank_aggregation import *
 
@@ -164,38 +164,39 @@ class IBLR_M:
         sigma_star : np.ndarray of shape (n_neighbors, n_labels)
             Consistently extended rankings of neighbors.
         """
-        sigma_star = np.zeros_like(bold_sigma)
+        sigma_star = -1 * np.ones_like(bold_sigma) # Contribution of each neighbor to prediction
         for a, sigma in enumerate(bold_sigma):
+            # For incomplete datasets
             if len(np.where(np.isnan(sigma))[0]) > 0:
                 sigma_star_i = deepcopy(sigma)
                 empty_labels = np.argwhere(np.isnan(sigma)).flatten()
                 assigned_position_by_empty_label = np.zeros_like(empty_labels)
                 ranked_labels = list(np.where(~np.isnan(sigma))[0])
+                assert len(ranked_labels) == bold_sigma.shape[1] - len(empty_labels)
                 for i, empty_label in enumerate(empty_labels):
                     min_discordant_num = 9999999
                     position_to_assign = 9999999
-                    for j in range(
+                    for k in range(
                         len(ranked_labels) + 1
-                    ):  # j is the position that the empty_label will be inserted into.
-                        for k in ranked_labels:  # Going through all ranked labels
-                            labels_before_j = np.where(sigma <= k)[0]
-                            pi_k_greater_than_pi_i = np.where(
-                                pi_hat > pi_hat[empty_label]
-                            )
+                    ):  # for k in ranked_labels:  # Going through all ranked labels
+                        labels_before_j = np.where(sigma <= k)[0]
+                        pi_k_greater_than_pi_i = np.where(
+                            pi_hat > pi_hat[empty_label]
+                        )
 
-                            labels_after_j = np.where(sigma > k)[0]
-                            pi_k_smaller_than_pi_i = np.where(
-                                pi_hat < pi_hat[empty_label]
-                            )
+                        labels_after_j = np.where(sigma > k)[0]
+                        pi_k_smaller_than_pi_i = np.where(
+                            pi_hat < pi_hat[empty_label]
+                        )
 
-                            num_discordant = len(
-                                np.intersect1d(labels_before_j, pi_k_greater_than_pi_i)
-                            ) + len(
-                                np.intersect1d(labels_after_j, pi_k_smaller_than_pi_i)
-                            )
-                            if num_discordant < min_discordant_num:
-                                min_discordant_num = num_discordant
-                                position_to_assign = k
+                        num_discordant = len(
+                            np.intersect1d(labels_before_j, pi_k_greater_than_pi_i)
+                        ) + len(
+                            np.intersect1d(labels_after_j, pi_k_smaller_than_pi_i)
+                        )
+                        if num_discordant < min_discordant_num:
+                            min_discordant_num = num_discordant
+                            position_to_assign = k
                     assigned_position_by_empty_label[i] = position_to_assign
                 for empty_label_ind, assigned_position in enumerate(
                     assigned_position_by_empty_label
@@ -203,44 +204,26 @@ class IBLR_M:
                     sigma_star_i[empty_labels[empty_label_ind]] = (
                         assigned_position + 0.5
                     )
-
                 # If there are multiple indices inserted at the same position, 
                 # we put them in the same order as in pi.
                 for val in np.unique(sigma_star_i):
-                    if len(np.where(sigma_star_i == val)[0]) > 0 and int(val) != val:
+                    if len(np.where(sigma_star_i == val)[0]) > 1 and int(val) != val:
                         inds_to_adjust = np.where(sigma_star_i == val)[0]
                         adjust_vals = [
                             x / (len(inds_to_adjust) + 1)
                             for x in range(1, len(inds_to_adjust) + 1)
                         ]
-                        for a, ind in enumerate(np.argsort(pi_hat[inds_to_adjust])):
-                            sigma_star_i[inds_to_adjust[ind]] += -0.5 + adjust_vals[a]
+                        for b, ind in enumerate(np.argsort(pi_hat[inds_to_adjust])):
+                            sigma_star_i[inds_to_adjust[ind]] += -0.5 + adjust_vals[b]
                 sigma_star[a] = sigma_star_i
+            # For complete datasets
             else:
                 sigma_star[a] = sigma
+        # print("SIGMA STAR", sigma_star)
         order = np.argsort(sigma_star, axis=1)
         rank = np.argsort(order, axis=1) + np.ones_like(order)
+        # print("RANKED SIGMA", rank)
         return rank
-
-    def _get_theta_hat(self, bold_sigma, pi_hat):
-        """Computes the maximum likelihood estimation of spread parameter theta_hat
-        from the mean observed distance from pi_hat.
-        Will implement later
-
-        Parameter
-        ---------
-        bold_sigma : np.ndarray of shape (n_neighbors, n_labels)
-            Ranking labels of neighbors, where unranked labels are np.nan
-
-        pi_hat : np.ndarray of shape (n_labels,)
-            Locally most probable ranking, found by borda count of sigma_i
-
-        Returns
-        --------
-        theta_hat : float
-            Estimated value of spread parameter which can be interpreted as model confidence.
-        """
-        pass
 
     def predict(self, X):
         """Predicts the rankings for test instances.
@@ -256,8 +239,13 @@ class IBLR_M:
             Estimated rankings for each sample.
         """
         # Line 1 : Find the k nearest neghbors of x in T
-        neighbor_inds = self.neigh.kneighbors(
-            X, self.n_neighbors, return_distance=False
+        neighbor_dists, neighbor_inds = self.neigh.kneighbors(
+            X, self.n_neighbors, return_distance=True
+        )
+        dist_diffs = np.max(neighbor_dists, axis=1) - np.min(neighbor_dists, axis=1)
+        neighbor_dist_weights = np.divide(
+            np.max(neighbor_dists, axis=1).reshape(-1,1) - neighbor_dists,
+            np.tile(dist_diffs.reshape(-1,1), (1, neighbor_dists.shape[1]))
         )
         # Line 2 : get neighbor rankings
         neighbor_rankings = np.zeros(
@@ -265,8 +253,16 @@ class IBLR_M:
         )
         for i, row in enumerate(neighbor_inds):
             neighbor_rankings[i, :, :] = self.y_train[row, :].T
+        # Number of labeled portions for each neighbor
+        neighbor_sampled_weights = np.sum(
+            ~np.isnan(neighbor_rankings), axis=1
+        ) / self.y_train.shape[1]
+        neighbor_weights = np.multiply(
+            neighbor_dist_weights,
+            neighbor_sampled_weights
+        )
         # Line 3 : get generalized Borda count from neighbor rankings
-        pi_hat = borda(neighbor_rankings)  # shape n_samples, n_labels
+        pi_hat = borda_count(neighbor_rankings, neighbor_weights)  # shape n_samples, n_labels
         pi = np.zeros_like(pi_hat)
         count = 0
         while np.any(pi != pi_hat):
@@ -276,20 +272,15 @@ class IBLR_M:
             all_sigma_star = np.zeros_like(neighbor_rankings)
             for i in range(X.shape[0]):
                 sigma_star_by_instance = self._most_probable_extension(
-                    neighbor_rankings[i, :, :].T, pi_hat
+                    neighbor_rankings[i, :, :].T, pi_hat[i]
                 )
                 all_sigma_star[i, :, :] = sigma_star_by_instance.T
             # Line 9
-            pi = borda(
+            pi = borda_count(
                 all_sigma_star
-            )  # will need to fix this into completed_neighbor_rankings
+            ) 
             count += 1
         return pi_hat
-        # np.ones_like(pi_hat) * pi_hat.shape[1] - pi_hat
-        # theta_hat = np.zeros(neighbor_rankings.shape[0])
-        # for i in range(neighbor_rankings.shape[0]):
-        #     theta_hat[i] = self._get_theta_hat(neighbor_rankings[i,:,:].T, pi_hat)
-        # return theta_hat, pi_hat
 
 
 class IBLR_PL:

@@ -35,7 +35,7 @@ def borda(rank_collection):
     )  # returns lowest value to highest score
 
 
-def borda_count(rank_collection):
+def borda_count(rank_collection, weights=None):
     """Implements the actual Borda ranking aggregation.
 
     Parameters
@@ -44,25 +44,33 @@ def borda_count(rank_collection):
         Predicted rankings of labels from n_models number of different models.
         i.e. the smaller the value, the more preferred.
         When there are nan values, we assume that the rank vector's values are adjusted to [1, n_non_nan labels]
+    weights : np.ndarray of shape (n_models,)
+        Weights, as computed by 'weighted distance * portion of ranks' of each neighbor.
 
     Returns
     -------
     rank_array : np.ndarray of shape (n_samples, n_labels)
     """
     n_samples, n_labels, n_models = rank_collection.shape
-    # score_array = np.zeros((n_samples, n_labels))
-    if np.any(np.isnan(rank_collection)):  # For the generalized version
-        n_ranked_labels = np.repeat(
+    if np.any(np.isnan(rank_collection)):  # For the generalized version with incomplete labels
+        n_ranked_labels = np.tile(
             np.expand_dims(np.sum(np.isnan(rank_collection), axis=1), axis=1),
-            n_labels,
-            axis=1
+            (1,n_labels,1)
         )
         score_array = np.divide(
-            n_labels * (n_ranked_labels - rank_collection + 1),
+            (n_labels+1) * (n_ranked_labels - rank_collection + 1),
             n_ranked_labels + 1
-        )
-        score_array[np.where(np.isnan(score_array))] = 0.5 * (n_labels + 1) # Move towards the end
-        score_array = np.sum(score_array, axis=2)
+        ) # Scores for ranked labels
+        score_array[np.where(np.isnan(score_array))] = 0.5 * (n_labels + 1) # Scores for Incomplete labels
+        if weights is None :
+            score_array = np.sum(score_array, axis=2)
+        else :
+            score_by_sample = []
+            for i in range(score_array.shape[0]) :
+                score_by_sample.append(
+                    np.dot(score_array[i], weights[i]) / np.sum(weights[i])
+                )
+            score_array = np.vstack(tuple(score_by_sample))
     else:  # complete version
         score_array = np.sum(rank_collection.shape[1] - rank_collection, axis=2)
 

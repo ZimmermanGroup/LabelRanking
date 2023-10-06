@@ -5,7 +5,7 @@ from sklearn.model_selection import KFold
 from scipy.stats import kendalltau, mstats
 from label_ranking import *
 from rank_aggregation import *
-# from sklr.tree import DecisionTreeLabelRanker
+from sklr.tree import DecisionTreeLabelRanker
 from tqdm import tqdm
 import argparse
 
@@ -40,8 +40,9 @@ def main(parser):
     model_instances = {
         "lrrf":LabelRankingRandomForest(),
         "rpc":RPC(base_learner=LogisticRegression(C=1), cross_validator=None),
-        "ibm":IBLR_M(n_neighbors=5, metric="euclidean"),
-        "ibpl":IBLR_PL(n_neighbors=5)
+        "ibm":IBLR_M(n_neighbors=30, metric="euclidean"),
+        "ibpl":IBLR_PL(n_neighbors=5),
+        "lrt":DecisionTreeLabelRanker()
     }
     datasets = {
         "elevators":[9,9],
@@ -61,7 +62,6 @@ def main(parser):
         )
         X = dataset_df.iloc[:, : datasets[dataset_name][0]].to_numpy()
         y = dataset_df.iloc[:, -1 * datasets[dataset_name][1] :].to_numpy()
-
         for j in tqdm(range(N_ITER)):
             kf = KFold(n_splits=N_CV, shuffle=True, random_state=42 + j)
 
@@ -73,12 +73,12 @@ def main(parser):
                     random_array = np.random.rand(y_train.shape[0], y_test.shape[1])
                     y_train_missing = deepcopy(y_train).astype(float)
                     y_train_missing[np.where(random_array <= parser.missing_portion)] = np.nan
-                    y_train = mstats.rankdata(np.ma.masked_invalid(y_train_missing))
-                    y_train[y_train == 0] = np.nan
                     # All three shouldn't be nans
-                    for row_ind in np.where(np.sum(np.isnan(y_train), axis=1)==3) :
-                        y_train[row_ind, row_ind%y_train.shape[1]] = y_train_actual[row_ind, row_ind%y_train.shape[1]]
-
+                    for row_ind in np.where(np.sum(np.isnan(y_train_missing), axis=1)==y_train_missing.shape[1]) :
+                        y_train_missing[row_ind, row_ind%y_train_missing.shape[1]] = y_train_actual[row_ind, row_ind%y_train_missing.shape[1]]
+                    y_train = mstats.rankdata(np.ma.masked_invalid(y_train_missing), axis=1)
+                    y_train[y_train == 0] = np.nan
+                    
                 for l, model_name in enumerate(parser.algorithms):
                     model = model_instances[model_name]
                     model.fit(X_train, y_train)
