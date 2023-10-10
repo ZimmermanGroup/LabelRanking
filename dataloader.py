@@ -171,7 +171,7 @@ class NatureDataset(Dataset):
         X_fp : np.ndarray of shape (n_rxns, n_features)
             n_features depends on self.for_regressor
         """
-        mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
+        mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=fpSize)
         if self.for_regressor:
             fp_arrays = []
             for i, row in self.df.iterrows():
@@ -256,7 +256,8 @@ class NatureDataset(Dataset):
         return self._y_yield
 
     def _sort_yield_by_substrate(self):
-        """Prepares an array of yields where each row corresponds to a substrate and column corresponds to reactions conditions."""
+        """Prepares an array of yields where each row and column correspond to 
+        a substrate and reactions conditions, respectively."""
         array = np.zeros((len(self.smiles_list), len(self.cats) * len(self.bases)))
         for i, row in self.df.iterrows():
             y_val = row["Rel. % Conv."]
@@ -667,6 +668,8 @@ class DeoxyDataset(Dataset):
         elif self.component_to_rank == "base":
             self.n_rank_component = 4
             self.n_non_rank_component = 5  # 5 sulfonyl fluorides
+        elif self.component_to_rank == "both":
+            self.n_rank_component = 20
 
     def _combine_desc_arrays(self, substrate_array, reagent_array, n_base_bits=1):
         """

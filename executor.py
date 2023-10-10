@@ -6,6 +6,7 @@ from sklearn.model_selection import GridSearchCV, PredefinedSplit
 from dataloader import *
 from evaluator import *
 
+np.random.seed(42)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Specify the evaluation to run.")
@@ -64,6 +65,12 @@ def parse_args():
         "--baseline",
         action="store_true",
         help="Include baseline models - avg_yield.",
+    )
+    parser.add_argument(
+        "--n_missing_reaction",
+        default=0,
+        type=int,
+        help="Number of reactions missing from each substrate.",
     )
     parser.add_argument(
         "-s",
@@ -130,6 +137,10 @@ def run_nature(parser):
     label_component = parser.label_component[0]
     lr_algorithms, classifiers = parse_algorithms(parser)
     n_rxns = 1  # Since there are only 4 reaction condition candidates
+    if parser.n_missing_reaction > 0 :
+        n_evals = 2
+    else :
+        n_evals = 1
     # Evaluations
     perf_dicts = []
     if parser.rfr:
@@ -140,7 +151,7 @@ def run_nature(parser):
             np.repeat(np.arange(int(onehot_array.shape[0] // 4)), 4)
         )
         inner_ps = PredefinedSplit(
-            np.repeat(np.arange(int(onehot_array.shape[0] // 4 - 1)), 4)
+            np.repeat(np.arange(int(onehot_array.shape[0] // 4 - 1)), 4 - parser.n_missing_reaction)
         )
         evaluator = RegressorEvaluator(
             dataset,
@@ -160,6 +171,8 @@ def run_nature(parser):
             ],
             ["RFR"],
             outer_ps,
+            parser.n_missing_reaction,
+            n_evals
         ).train_and_evaluate_models()
         perf_dicts.append(evaluator.perf_dict)
     if parser.baseline or len(lr_algorithms) > 0 or len(classifiers) > 0:
@@ -167,7 +180,7 @@ def run_nature(parser):
         onehot_array = dataset.X_onehot
         ps = PredefinedSplit(np.arange(onehot_array.shape[0]))
         if parser.baseline:
-            baseline_evaluator = BaselineEvaluator(dataset, n_rxns, ps)
+            baseline_evaluator = BaselineEvaluator(dataset, n_rxns, ps, parser.n_missing_reaction, n_evals)
             baseline_CV = baseline_evaluator.train_and_evaluate_models()
             baseline_validation = baseline_evaluator.external_validation()
             # perf_dicts.append(baseline_evaluator.perf_dict)
@@ -179,6 +192,8 @@ def run_nature(parser):
                 n_rxns,
                 lr_algorithms,
                 ps,
+                parser.n_missing_reaction,
+                n_evals
             )
             label_ranking_CV = label_ranking_evaluator.train_and_evaluate_models()
             label_ranking_validation = label_ranking_evaluator.external_validation()
@@ -214,6 +229,10 @@ def run_informer(parser):
     elif label_component == "catalyst_ratio":
         n_rxns = 4
         n_other_component = 2  # may need to multiply by 5
+    if parser.n_missing_reaction > 0 :
+        n_evals = 2
+    else :
+        n_evals = 1
 
     lr_algorithms, classifiers = parse_algorithms(parser)
     # Evaluations
@@ -221,17 +240,16 @@ def run_informer(parser):
     if parser.rfr:
         if parser.train_together:
             outer_ps = PredefinedSplit(np.repeat(np.arange(11), 40))
-            inner_ps = PredefinedSplit(np.repeat(np.arange(10), 40))
+            inner_ps = PredefinedSplit(np.repeat(np.arange(10), 40 - parser.n_missing_reaction))
 
         elif label_component == "amine_ratio":
             outer_ps = [PredefinedSplit(np.repeat(np.arange(11), 10))] * 4
-            inner_ps = PredefinedSplit(np.repeat(np.arange(10), 10))
+            inner_ps = PredefinedSplit(np.repeat(np.arange(10), 10 - parser.n_missing_reaction))
 
         elif label_component == "catalyst_ratio":
             outer_ps = [PredefinedSplit(np.repeat(np.arange(11), 20))] * 2
-            inner_ps = PredefinedSplit(np.repeat(np.arange(10), 20))
+            inner_ps = PredefinedSplit(np.repeat(np.arange(10), 20 - parser.n_missing_reaction))
 
-        print(type(outer_ps))
         evaluator = RegressorEvaluator(
             InformerDataset(True, label_component, parser.train_together, n_rxns),
             parser.feature,
@@ -250,6 +268,8 @@ def run_informer(parser):
             ],
             ["RFR"],
             outer_ps,
+            parser.n_missing_reaction,
+            n_evals
         ).train_and_evaluate_models()
         perf_dicts.append(evaluator.perf_dict)
 
@@ -261,7 +281,7 @@ def run_informer(parser):
             ps = [PredefinedSplit(np.arange(11))] * n_other_component
         if parser.baseline:
             baseline_evaluator = BaselineEvaluator(
-                dataset, n_rxns, ps
+                dataset, n_rxns, ps, parser.n_missing_reaction, n_evals
             ).train_and_evaluate_models()
             perf_dicts.append(baseline_evaluator.perf_dict)
         if len(lr_algorithms) > 0:
@@ -271,6 +291,8 @@ def run_informer(parser):
                 n_rxns,
                 lr_algorithms,
                 ps,
+                parser.n_missing_reaction,
+                n_evals
             ).train_and_evaluate_models()
             perf_dicts.append(label_ranking_evaluator.perf_dict)
         if len(classifiers) > 0:
@@ -308,20 +330,24 @@ def run_deoxy(parser):
         elif label_component == "base":
             n_other_component = 5
     lr_algorithms, classifiers = parse_algorithms(parser)
+    if parser.n_missing_reaction > 0 :
+        n_evals = 2
+    else :
+        n_evals = 1
 
     # Evaluations
     perf_dicts = []
     if parser.rfr:
         if parser.train_together or label_component == "both":
             print("Training together or ranking all conditions")
-            inner_ps = PredefinedSplit(np.repeat(np.arange(31), 20))
+            inner_ps = PredefinedSplit(np.repeat(np.arange(31), 20 - parser.n_missing_reaction))
             outer_ps = PredefinedSplit(np.repeat(np.arange(32), 20))
         elif label_component == "base" and not parser.train_together:
             print("Not training together, ranking bases")
-            inner_ps = PredefinedSplit(np.repeat(np.arange(31), 4))
+            inner_ps = PredefinedSplit(np.repeat(np.arange(31), 4 - parser.n_missing_reaction))
             outer_ps = [PredefinedSplit(np.repeat(np.arange(32), 4))] * 5
         elif label_component == "sulfonyl_fluoride" and not parser.train_together:
-            inner_ps = PredefinedSplit(np.repeat(np.arange(31), 5))
+            inner_ps = PredefinedSplit(np.repeat(np.arange(31), 5 - parser.n_missing_reaction))
             outer_ps = [PredefinedSplit(np.repeat(np.arange(32), 5))] * 4
 
         evaluator = RegressorEvaluator(
@@ -342,6 +368,8 @@ def run_deoxy(parser):
             ],
             ["RFR"],
             outer_ps,
+            parser.n_missing_reaction,
+            n_evals
         ).train_and_evaluate_models()
         perf_dicts.append(evaluator.perf_dict)
 
@@ -356,7 +384,7 @@ def run_deoxy(parser):
             ps = [PredefinedSplit(np.arange(32))] * n_other_component
         if parser.baseline:
             baseline_evaluator = BaselineEvaluator(
-                dataset, n_rxns, ps
+                dataset, n_rxns, ps, parser.n_missing_reaction, n_evals
             ).train_and_evaluate_models()
             perf_dicts.append(baseline_evaluator.perf_dict)
         if len(lr_algorithms) > 0:
@@ -366,6 +394,8 @@ def run_deoxy(parser):
                 n_rxns,
                 lr_algorithms,
                 ps,
+                parser.n_missing_reaction,
+                n_evals
             ).train_and_evaluate_models()
             perf_dicts.append(label_ranking_evaluator.perf_dict)
         if len(classifiers) > 0:
@@ -404,7 +434,6 @@ def parse_perf_dicts(parser, perf_dicts):
             round(perf_df[perf_df["model"] == model]["kendall_tau"].mean(), 3),
             round(perf_df[perf_df["model"] == model]["regret"].mean(), 3),
         )
-
     save = parser.save
     if type(perf_dicts[0]) == list:
         full_perf_df = []
