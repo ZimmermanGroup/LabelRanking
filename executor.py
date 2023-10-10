@@ -6,6 +6,7 @@ from dataloader import *
 from evaluator import *
 
 np.random.seed(42)
+N_EVALS = 5
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Specify the evaluation to run.")
@@ -137,7 +138,7 @@ def run_nature(parser):
     lr_algorithms, classifiers = parse_algorithms(parser)
     n_rxns = 1  # Since there are only 4 reaction condition candidates
     if parser.n_missing_reaction > 0 :
-        n_evals = 2
+        n_evals = N_EVALS
     else :
         n_evals = 1
     # Evaluations
@@ -172,8 +173,11 @@ def run_nature(parser):
             outer_ps,
             parser.n_missing_reaction,
             n_evals
-        ).train_and_evaluate_models()
-        perf_dicts.append(evaluator.perf_dict)
+        )
+        regressor_CV = evaluator.train_and_evaluate_models()
+        # regressor_validation = evaluator.external_validation()
+        perf_dicts.append(regressor_CV.perf_dict)
+        # perf_dicts.append(regressor_validation.perf_dict)
     if parser.baseline or len(lr_algorithms) > 0 or len(classifiers) > 0:
         dataset = NatureDataset(False, label_component, n_rxns)
         onehot_array = dataset.X_onehot
@@ -181,9 +185,9 @@ def run_nature(parser):
         if parser.baseline:
             baseline_evaluator = BaselineEvaluator(dataset, n_rxns, ps, parser.n_missing_reaction, n_evals)
             baseline_CV = baseline_evaluator.train_and_evaluate_models()
-            baseline_validation = baseline_evaluator.external_validation()
-            # perf_dicts.append(baseline_evaluator.perf_dict)
+            # baseline_validation = baseline_evaluator.external_validation()
             perf_dicts.append(baseline_CV.perf_dict)
+            # perf_dicts.append(baseline_validation.valid_dict)
         if len(lr_algorithms) > 0:
             label_ranking_evaluator = LabelRankingEvaluator(
                 dataset,
@@ -195,8 +199,9 @@ def run_nature(parser):
                 n_evals
             )
             label_ranking_CV = label_ranking_evaluator.train_and_evaluate_models()
-            label_ranking_validation = label_ranking_evaluator.external_validation()
-            perf_dicts.append(label_ranking_evaluator.perf_dict)
+            # label_ranking_validation = label_ranking_evaluator.external_validation()
+            perf_dicts.append(label_ranking_CV.perf_dict)
+            # perf_dicts.append(label_ranking_validation.valid_dict)
         if len(classifiers) > 0:
             classifier_evaluator = MulticlassEvaluator(
                     dataset, 
@@ -208,8 +213,9 @@ def run_nature(parser):
                     n_evals
                 ).train_and_evaluate_models()
             classifier_CV = classifier_evaluator.train_and_evaluate_models()
-            classifier_validation = classifier_evaluator.external_validation()
-            perf_dicts.append(classifier_evaluator.perf_dict)
+            # classifier_validation = classifier_evaluator.external_validation()
+            perf_dicts.append(classifier_CV.perf_dict)
+            # perf_dicts.append(classifier_validation.valid_dict)
     return perf_dicts
 
 
@@ -235,7 +241,7 @@ def run_informer(parser):
         n_rxns = 4
         n_other_component = 2  # may need to multiply by 5
     if parser.n_missing_reaction > 0 :
-        n_evals = 2
+        n_evals = N_EVALS
     else :
         n_evals = 1
 
@@ -342,7 +348,7 @@ def run_deoxy(parser):
             n_other_component = 5
     lr_algorithms, classifiers = parse_algorithms(parser)
     if parser.n_missing_reaction > 0 :
-        n_evals = 2
+        n_evals = N_EVALS
     else :
         n_evals = 1
 
@@ -470,9 +476,15 @@ def parse_perf_dicts(parser, perf_dicts):
             comp = parser.label_component[0]
         elif len(parser.label_component) == 2:
             comp = "both"
-        full_perf_df.to_excel(
-            f"performance_excels/{parser.dataset}/{parser.feature}_{comp}_{parser.train_together}.xlsx"
-        )
+        if parser.n_missing_reaction == 0 :
+            full_perf_df.to_excel(
+                f"performance_excels/{parser.dataset}/{parser.feature}_{comp}_{parser.train_together}.xlsx"
+            )
+        else : 
+            full_perf_df.to_excel(
+                f"performance_excels/{parser.dataset}/{parser.feature}_{comp}_{parser.train_together}_rem{parser.n_missing_reaction}rxns.xlsx"
+            )
+
 
 
 def main(parser):

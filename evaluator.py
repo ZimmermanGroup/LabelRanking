@@ -302,9 +302,7 @@ class Evaluator(ABC):
                 if self.n_rxns_to_erase >= 1 :
                     # Need this block again so that we use the original arrays for different evaluations.
                     if X is not None:
-                        X_train, X_test = X[train_ind, :], X[test_ind]
-                        std = StandardScaler()
-                        X_train = std.fit_transform(X_train)
+                        X_train = std.transform(X[train_ind, :])
                     y_train, y_test = y[train_ind], y[test_ind]
                     inds_to_erase = list_of_inds_to_erase[eval_loop_num]
                     # For regressors
@@ -316,8 +314,8 @@ class Evaluator(ABC):
                         ])
                         inds_to_keep = [x for x in range(len(y_train)) if x not in inds_to_remove]
                         y_train = y_train[inds_to_keep]
-                        # print("YTRAIN", y_train)
                         X_train = X_train[inds_to_keep]
+                        if a == 0 : print("PROCESSED X TRAIN SHAPE", X_train.shape)
                     # For label ranking
                     elif np.ndim(y_train) == 2 :
                         y_train_missing = deepcopy(y_train).astype(float)
@@ -329,9 +327,9 @@ class Evaluator(ABC):
                             y_train[y_train == 0] = np.nan
                             # print("YTRAIN", y_train_missing)
                         elif type(self) == BaselineEvaluator :
-                            # print("YTRAIN", y_train_missing)
                             y_train = np.nanmean(y_train_missing, axis=0)
                             X_train = y_train
+                            X_test = y_train_missing
                         elif type(self) == MulticlassEvaluator :
                             y_train = np.nanmin(y_train_missing, axis=1)
                         elif type(self) == MultilabelEvaluator :
@@ -393,6 +391,7 @@ class Evaluator(ABC):
                             test_dists = test_dists.reshape(1, -1)
                         else:
                             model.fit(X_train, y_train)
+                    # For baseline
                     if y_yield is None:
                         (
                             processed_y_test,
@@ -454,7 +453,7 @@ class BaselineEvaluator(Evaluator):
 
     def _processing_before_logging(self, model, y_train, y_test):
         processed_pred_rank = np.tile(
-            yield_to_ranking(np.mean(y_train, axis=0)),
+            yield_to_ranking(np.nanmean(y_train, axis=0)),
             (y_test.shape[0], 1),
         )
         return y_test, processed_pred_rank
@@ -1082,7 +1081,6 @@ class RegressorEvaluator(Evaluator):
                 pred_rank_reshape = model.predict(X_test).flatten()
         elif type(self.dataset) == dataloader.InformerDataset:
             if self.dataset.train_together:
-            # assert len(y_test) == 40
                 if self.dataset.component_to_rank == "amine_ratio":
                     y_test_reshape = y_test.reshape(10, 4).T
                     pred_rank_reshape = yield_to_ranking(
@@ -1129,6 +1127,8 @@ class RegressorEvaluator(Evaluator):
                 y_test_reshape = y_test.flatten()
                 pred_rank_reshape = model.predict(X_test).flatten()
         elif type(self.dataset) == dataloader.NatureDataset:
+            print("ACTUAL Y", y_test)
+            print("PREDICTED Y", model.predict(X_test))
             y_test_reshape = y_test
             pred_rank_reshape = yield_to_ranking(model.predict(X_test))
         return y_test_reshape, pred_rank_reshape
