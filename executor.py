@@ -1,5 +1,4 @@
 import argparse
-from abc import ABC
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
 
@@ -200,8 +199,14 @@ def run_nature(parser):
             perf_dicts.append(label_ranking_evaluator.perf_dict)
         if len(classifiers) > 0:
             classifier_evaluator = MulticlassEvaluator(
-                dataset, parser.feature, classifiers, ps
-            )
+                    dataset, 
+                    parser.feature, 
+                    n_rxns, 
+                    classifiers, 
+                    ps,
+                    parser.n_missing_reaction,
+                    n_evals
+                ).train_and_evaluate_models()
             classifier_CV = classifier_evaluator.train_and_evaluate_models()
             classifier_validation = classifier_evaluator.external_validation()
             perf_dicts.append(classifier_evaluator.perf_dict)
@@ -298,7 +303,13 @@ def run_informer(parser):
         if len(classifiers) > 0:
             if n_rxns > 1:
                 classifier_evaluator = MultilabelEvaluator(
-                    dataset, parser.feature, classifiers, ps
+                    dataset, 
+                    parser.feature, 
+                    n_rxns,
+                    classifiers, 
+                    ps,
+                    parser.n_missing_reaction,
+                    n_evals
                 ).train_and_evaluate_models()
             perf_dicts.append(classifier_evaluator.perf_dict)
 
@@ -401,7 +412,13 @@ def run_deoxy(parser):
         if len(classifiers) > 0:
             if n_rxns == 1:
                 classifier_evaluator = MulticlassEvaluator(
-                    dataset, parser.feature, classifiers, ps
+                    dataset, 
+                    parser.feature, 
+                    n_rxns, 
+                    classifiers, 
+                    ps,
+                    parser.n_missing_reaction,
+                    n_evals
                 ).train_and_evaluate_models()
             perf_dicts.append(classifier_evaluator.perf_dict)
     return perf_dicts

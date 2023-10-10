@@ -293,11 +293,11 @@ class Evaluator(ABC):
                 X_test = y_train
             if y_yield is not None:
                 y_yield_test = y_yield[test_ind]
+            print()
             print("Compound", a)
             if self.n_rxns_to_erase >= 1 :
                 list_of_inds_to_erase = self._random_selection_of_inds_to_erase()
             for eval_loop_num in range(self.n_evaluations):
-                print()
                 print("EVALUATION #", eval_loop_num)
                 if self.n_rxns_to_erase >= 1 :
                     # Need this block again so that we use the original arrays for different evaluations.
@@ -332,7 +332,21 @@ class Evaluator(ABC):
                             # print("YTRAIN", y_train_missing)
                             y_train = np.nanmean(y_train_missing, axis=0)
                             X_train = y_train
-                        # print("YTRAIN", y_train)
+                        elif type(self) == MulticlassEvaluator :
+                            y_train = np.nanmin(y_train_missing, axis=1)
+                        elif type(self) == MultilabelEvaluator :
+                            y_yield_train = y_yield[train_ind]
+                            y_train_missing = deepcopy(y_yield_train).astype(float)
+                            y_train_missing[inds_to_erase] = np.nan
+                            # print("YTRAIN", y_train_missing)
+                            nonzero_inds = np.argpartition(-1*y_train_missing, self.n_rxns, axis=1)[:, :self.n_rxns]
+                            y_train = np.zeros_like(y_train_missing)
+                            for row_num, col_nums in enumerate(nonzero_inds) :
+                                y_train[
+                                    np.array([row_num]*self.n_rxns),
+                                    col_nums
+                                ] = 1
+                            # print("MULTILABEL YTRAIN", y_train)
 
                 for b, (model, model_name) in enumerate(
                     zip(self.list_of_algorithms, self.list_of_names)
@@ -507,11 +521,13 @@ class MulticlassEvaluator(Evaluator):
         self,
         dataset,
         feature_type,
+        n_rxns,
         list_of_names,
         outer_cv,
-        n_rxns=1,
+        n_rxns_to_erase=0, 
+        n_evaluations=1
     ):
-        super().__init__(dataset, n_rxns, outer_cv)
+        super().__init__(dataset, n_rxns, outer_cv, n_rxns_to_erase, n_evaluations)
         self.feature_type = feature_type
         self.list_of_names = list_of_names
         self.list_of_algorithms = []
@@ -708,18 +724,14 @@ class MultilabelEvaluator(MulticlassEvaluator):
         self,
         dataset,
         feature_type,
+        n_rxns,
         list_of_names,
         outer_cv,
-        n_rxns=1,
+        n_rxns_to_erase=0, 
+        n_evaluations=1
     ):
-        super().__init__(
-            dataset,
-            feature_type,
-            list_of_names,
-            outer_cv,
-            n_rxns,
-        )
-
+        super().__init__(dataset, feature_type, n_rxns, list_of_names, outer_cv, n_rxns_to_erase, n_evaluations)
+        
         self.list_of_algorithms = []
         for name in self.list_of_names:
             if name == "RFC":
@@ -817,9 +829,6 @@ class MultilabelEvaluator(MulticlassEvaluator):
                 zip(X, y_label, y_yield, self.outer_cv)
             ):  # X is not included as it remains the same across different reagents
                 perf_dict = deepcopy(PERFORMANCE_DICT)
-                # print("X array shape:", X_array.shape)
-                # print("Y test array", yield_array)
-                # print("ARRAY SHAPE:", array.shape)
                 self._CV_loops(
                     perf_dict,
                     cv,
@@ -1147,7 +1156,7 @@ class RegressorEvaluator(Evaluator):
                 )
                 self.perf_dict.append(perf_dict)
         # cases when both reaction components are ranked simultaneously 
-        # or one component is rankedbut training together
+        # or one component is ranked but training together
         else:  
             perf_dict = PERFORMANCE_DICT
             self._CV_loops(
