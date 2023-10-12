@@ -21,7 +21,6 @@ PERFORMANCE_DICT = {
 }
 np.random.seed(42)
 
-
 class Evaluator(ABC):
     """Base class for evaluators for various types of algorithsm.
 
@@ -230,12 +229,10 @@ class Evaluator(ABC):
         Currently hard-coding the shape of the array generated."""
         list_of_inds_to_cover = []
         if type(self.dataset) == dataloader.NatureDataset :
-            if self.dataset.component_to_rank == "sulfonamide":
-                shape = (18, 4)
-            elif self.dataset.component_to_rank == "amide":
-                shape = (18, 4)
-            elif self.dataset.component_to_rank == "amine":
-                shape = (58, 4)
+            if self.dataset.component_to_rank == "amine":
+                shape = (53, self.dataset.n_rank_component)
+            else :
+                shape = (18, self.dataset.n_rank_component)
         elif type(self.dataset) == dataloader.DeoxyDataset :
             shape = (31, self.dataset.n_rank_component)
         elif type(self.dataset) == dataloader.InformerDataset :
@@ -293,6 +290,7 @@ class Evaluator(ABC):
                 X_test = y_train
             if y_yield is not None:
                 y_yield_test = y_yield[test_ind]
+                y_yield_train = y_yield[train_ind]
             print()
             print("Compound", a)
             if self.n_rxns_to_erase >= 1 :
@@ -306,7 +304,7 @@ class Evaluator(ABC):
                     y_train, y_test = y[train_ind], y[test_ind]
                     inds_to_erase = list_of_inds_to_erase[eval_loop_num]
                     # For regressors
-                    if np.ndim(y_train) == 1 :
+                    if type(self) == RegressorEvaluator :
                         inds_to_remove = []
                         inds_to_remove.extend([
                             self.dataset.n_rank_component * row_num + col_num \
@@ -316,8 +314,12 @@ class Evaluator(ABC):
                         y_train = y_train[inds_to_keep]
                         X_train = X_train[inds_to_keep]
                         if a == 0 : print("PROCESSED X TRAIN SHAPE", X_train.shape)
+                    elif type(self) == MulticlassEvaluator :
+                        y_train_missing = deepcopy(y_yield_train).astype(float)
+                        y_train_missing[inds_to_erase] = np.nan
+                        y_train = np.nanargmax(y_train_missing, axis=1)
                     # For label ranking
-                    elif np.ndim(y_train) == 2 :
+                    else :
                         y_train_missing = deepcopy(y_train).astype(float)
                         y_train_missing[inds_to_erase] = np.nan
                         if type(self) == LabelRankingEvaluator :
@@ -330,8 +332,6 @@ class Evaluator(ABC):
                             y_train = np.nanmean(y_train_missing, axis=0)
                             X_train = y_train
                             X_test = y_train_missing
-                        elif type(self) == MulticlassEvaluator :
-                            y_train = np.nanmin(y_train_missing, axis=1)
                         elif type(self) == MultilabelEvaluator :
                             y_yield_train = y_yield[train_ind]
                             y_train_missing = deepcopy(y_yield_train).astype(float)
@@ -413,6 +413,7 @@ class Evaluator(ABC):
                             processed_y_test,
                             processed_pred_rank,
                         ) = further_action_before_logging(model, X_test, y_yield_test)
+                    print(processed_y_test, processed_pred_rank)
                     self._evaluate_alg(
                         perf_dict,
                         processed_y_test,
@@ -596,7 +597,7 @@ class MulticlassEvaluator(Evaluator):
             Updated pred_proba array with all classes.
         """
         new_pred_proba = []
-        for i in range(4):
+        for i in range(self.dataset.n_rank_component):
             if i not in model.classes_:
                 new_pred_proba.append(0)
             else:
@@ -648,8 +649,6 @@ class MulticlassEvaluator(Evaluator):
                 zip(X, y, y_yield, self.outer_cv)
             ):  # X is not included as it remains the same across different reagents
                 perf_dict = deepcopy(PERFORMANCE_DICT)
-                # print("X array shape:", X_array.shape)
-                # print("ARRAY SHAPE:", array.shape)
                 self._CV_loops(
                     perf_dict,
                     cv,
@@ -1078,7 +1077,7 @@ class RegressorEvaluator(Evaluator):
                     pred_rank_reshape = yield_to_ranking(model.predict(X_test))
             else:
                 y_test_reshape = y_test.flatten()
-                pred_rank_reshape = model.predict(X_test).flatten()
+                pred_rank_reshape = yield_to_ranking(model.predict(X_test).flatten())
         elif type(self.dataset) == dataloader.InformerDataset:
             if self.dataset.train_together:
                 if self.dataset.component_to_rank == "amine_ratio":
@@ -1125,7 +1124,7 @@ class RegressorEvaluator(Evaluator):
                     )
             else :
                 y_test_reshape = y_test.flatten()
-                pred_rank_reshape = model.predict(X_test).flatten()
+                pred_rank_reshape = yield_to_ranking(model.predict(X_test).flatten())
         elif type(self.dataset) == dataloader.NatureDataset:
             print("ACTUAL Y", y_test)
             print("PREDICTED Y", model.predict(X_test))

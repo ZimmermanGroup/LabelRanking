@@ -6,7 +6,7 @@ from dataloader import *
 from evaluator import *
 
 np.random.seed(42)
-N_EVALS = 5
+N_EVALS = 10
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Specify the evaluation to run.")
