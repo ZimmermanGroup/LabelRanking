@@ -2,28 +2,32 @@ import numpy as np
 from copy import deepcopy
 from itertools import combinations
 from scipy.optimize import line_search
+from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neighbors import NearestNeighbors
+from sklearn.base import BaseEstimator
 from sklearn.utils import resample
+from sklearn.metrics import make_scorer
 from scipy.stats import kendalltau, mstats
 from math import log
 from rank_aggregation import *
 
 ### We deal with y as rankings, not scores or preferences. The smaller values, the better.
 
+def kendall_tau(y_true, y_pred):
+    kt = kendalltau(y_true, y_pred).statistic
+    return kt
+kt_score = make_scorer(kendall_tau, greater_is_better=True)
 
-class RPC:
+
+class RPC(BaseEstimator):
     """Reproduces the ranking by pairwise comparison method proposed in
     Hüllermeier et al. Artif. Intel. 2008, 1897. Label ranking by learning pairwise preferences.
-    The paper uses logistic regression as their base learner, but this code fixes it such that any binary classifier is used.
+    We follow the paper using logistic regression as their base learner.
 
     Parameters
     ----------
-    base_learner: Binary classifier.
-        Algorithm to use for predicting label preference.
-    cross_validator : GridSearchCV object.
-        Defines how to conduct cross validation for each predictor.
-    vote_aggregator : TODO
+    Please take a look at the documentation of sklearn.linear_model.LogisticRegression
 
     Attributes
     ----------
@@ -32,12 +36,20 @@ class RPC:
 
     def __init__(
         self,
-        base_learner,
-        cross_validator=None,
+        C=1,
+        penalty="l1",
+        random_state=42,
+        solver="liblinear"
+        # base_learner,
+        # cross_validator=None,
         # vote_aggregator
     ):
-        self.base_learner = base_learner
-        self.cross_validator = cross_validator
+        self.C = C
+        self.penalty = penalty
+        self.random_state = random_state
+        self.solver = solver
+        # self.base_learner = base_learner
+        # self.cross_validator = cross_validator
         # self.vote_aggregator = vote_aggregator
 
     def fit(self, X, y):
@@ -70,12 +82,18 @@ class RPC:
                     & (~np.isnan(sub_y[:, 1]))
                     & (sub_y[:, 0] != sub_y[:, 1])
                 ]
-                if self.cross_validator is None:
-                    model = deepcopy(self.base_learner)
-                    model.fit(sub_X, sub_preference)
-                else:
-                    self.cross_validator.fit(sub_X, sub_preference)
-                    model = self.cross_validator.best_estimator_
+                # if self.cross_validator is None:
+                # model = deepcopy(self.base_learner)
+                model = LogisticRegression(
+                    penalty=self.penalty,
+                    C = self.C,
+                    random_state=self.random_state,
+                    solver = self.solver
+                )
+                model.fit(sub_X, sub_preference)
+                # else:
+                #     self.cross_validator.fit(sub_X, sub_preference)
+                #     model = self.cross_validator.best_estimator_
                     # print(self.cross_validator.best_params_)
                 self.learner_by_column_pair.update({column_combination: model})
             # If there one label constantly is preferred over the other
@@ -119,7 +137,7 @@ class RPC:
         return rank
 
 
-class IBLR_M:
+class IBLR_M(BaseEstimator):
     """Reproduces the instance based label ranking with the probabilistic mallows model, proposed in
     W. Cheng, W, Hühn, E. Hüllermeier, ICML, 2009. Decision Tree and Instance-Based Learning for Label Ranking.
 
@@ -134,7 +152,7 @@ class IBLR_M:
 
     """
 
-    def __init__(self, n_neighbors, metric):
+    def __init__(self, n_neighbors=3, metric="euclidean"):
         self.n_neighbors = n_neighbors
         self.metric = metric
 
@@ -276,7 +294,7 @@ class IBLR_M:
         return pi_hat
 
 
-class IBLR_PL:
+class IBLR_PL(BaseEstimator):
     """Reproduces the instance based label ranking with the probabilistic Plackett-Luce model, posposed in
     W. Cheng, K. Dembczyński, E. Hüllermeier, ICML, 2010. Label Ranking Methods Based on the Plackett-Luce Model.
     Currently, the kendall tau values are negative - need to figure out why but values seem high.
@@ -291,7 +309,7 @@ class IBLR_PL:
         If metric is a callable function, it takes two arrays representing 1D vectors as inputs and must return one value indicating the distance between those vectors.
     """
 
-    def __init__(self, n_neighbors, metric="euclidean"):
+    def __init__(self, n_neighbors=3, metric="euclidean"):
         self.n_neighbors = n_neighbors
         self.metric = metric
 
@@ -415,7 +433,7 @@ class IBLR_PL:
         )
 
 
-class LabelRankingRandomForest:
+class LabelRankingRandomForest(BaseEstimator):
     """Reproduces the label ranking random forest method proposed in
     Y. Zhou and G. Qiu, Expert Systems App. 2018, 99. Random forest for label ranking.
     This paper builds on random forests.
@@ -427,11 +445,19 @@ class LabelRankingRandomForest:
         self,
         n_estimators=50,
         max_depth=8,
-        cross_validator=None,
+        # cross_validator=None,
     ):
         self.n_estimators = n_estimators
         self.max_depth = max_depth
-        self.cross_validator = cross_validator
+        # self.cross_validator = cross_validator
+    
+    def get_params(self, deep=True):
+        return {"n_estimators":self.n_estimators, "max_depth":self.max_depth}
+
+    def set_params(self, **parameters):
+        for parameter, value in parameters.items():
+            setattr(self, parameter, value)
+        return self
 
     def fit(self, X, y):
         """Builds a random forest classifier by TLAC (top label as class).
@@ -448,19 +474,19 @@ class LabelRankingRandomForest:
         # print(y)
         tlac_y = np.nanargmin(y, axis=1)
 
-        if self.cross_validator is not None:
-            self.cross_validator.fit(X, tlac_y)
-            model = self.cross_validator.best_estimator_
-        else:
-            model = RandomForestClassifier(
-                n_estimators=self.n_estimators,
-                max_depth=self.max_depth,
-                criterion="log_loss",
-                max_features="log2",
-                n_jobs=-1,
-                random_state=42,
-            )
-            model.fit(X, tlac_y)
+        # if self.cross_validator is not None:
+        #     self.cross_validator.fit(X, tlac_y)
+        #     model = self.cross_validator.best_estimator_
+        # else:
+        model = RandomForestClassifier(
+            n_estimators=self.n_estimators,
+            max_depth=self.max_depth,
+            criterion="log_loss",
+            max_features="log2",
+            n_jobs=-1,
+            random_state=42,
+        )
+        model.fit(X, tlac_y)
         self.model = model
         self.n_labels = y.shape[1]
 

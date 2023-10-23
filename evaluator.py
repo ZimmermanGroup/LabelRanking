@@ -380,8 +380,8 @@ class Evaluator(ABC):
                         # to the model, use Tanimoto distances.
                         elif (
                             type(model) == GridSearchCV
-                            and type(model.estimator) == KNeighborsClassifier
-                            or type(model) in [IBLR_M, IBLR_PL]
+                            and type(model.estimator) in [KNeighborsClassifier, IBLR_M, IBLR_PL]
+                            # or type(model) in [IBLR_M, IBLR_PL]
                         ) and not self.dataset.train_together:
                             dist_array = self.dataset.X_dist
                             train_dists, test_dists = self._dist_array_train_test_split(
@@ -400,9 +400,10 @@ class Evaluator(ABC):
                     # Nearest neighbors based models require different input from other algorithms.
                     elif (
                         type(model) == GridSearchCV
-                        and type(model.estimator) == KNeighborsClassifier
-                        or type(model) in [IBLR_M, IBLR_PL]
-                        and not self.dataset.train_together
+                        # and type(model.estimator) == KNeighborsClassifier
+                        and type(model.estimator) in [KNeighborsClassifier, IBLR_M, IBLR_PL]
+                        # or type(model) in [IBLR_M, IBLR_PL]
+                        # and not self.dataset.train_together
                     ):
                         (
                             processed_y_test,
@@ -879,46 +880,54 @@ class LabelRankingEvaluator(Evaluator):
         feature_type,
         n_rxns,
         list_of_names,
+        list_of_algorithms,
         outer_cv,
         n_rxns_to_erase=0, 
         n_evaluations=1
     ):
         super().__init__(dataset, n_rxns, outer_cv, n_rxns_to_erase, n_evaluations)
         self.feature_type = feature_type
+        self.list_of_algorithms = list_of_algorithms
         self.list_of_names = list_of_names
 
-        self.list_of_algorithms = []
-        for name in self.list_of_names:
-            if name == "RPC":
-                self.list_of_algorithms.append(
-                    RPC(
-                        base_learner=LogisticRegression(
-                            C=1, solver="liblinear", random_state=42
-                        )
-                    )
-                )
-            elif name == "LRT":
-                self.list_of_algorithms.append(
-                    DecisionTreeLabelRanker(
-                        random_state=42, min_samples_split=4 * 2  # might need to change
-                    )
-                )
-            elif name == "LRRF":
-                self.list_of_algorithms.append(
-                    LabelRankingRandomForest(n_estimators=50)
-                )
-            elif name == "IBM":
-                if self.dataset.train_together:
-                    metric = "euclidean"
-                else:
-                    metric = "precomputed"
-                self.list_of_algorithms.append(IBLR_M(n_neighbors=3, metric=metric))
-            elif name == "IBPL":
-                if self.dataset.train_together:
-                    metric = "euclidean"
-                else:
-                    metric = "precomputed"
-                self.list_of_algorithms.append(IBLR_PL(n_neighbors=3, metric=metric))
+        # self.list_of_algorithms = []
+        # for name in self.list_of_names:
+        #     if name == "RPC":
+        #         self.list_of_algorithms.append(
+        #             RPC(
+        #                 base_learner=LogisticRegression(
+        #                     C=1, solver="liblinear", random_state=42
+        #                 )
+        #             )
+        #         )
+        #     elif name == "LRT":
+        #         self.list_of_algorithms.append(
+        #             DecisionTreeLabelRanker(
+        #                 random_state=42, min_samples_split=4 * 2  # might need to change
+        #             )
+        #         )
+        #     elif name == "LRRF":
+        #         self.list_of_algorithms.append(
+        #             # LabelRankingRandomForest(n_estimators=50)
+        #             GridSearchCV(
+        #                 LabelRankingRandomForest(),
+        #                 param_grid = {"n_estimators":[25,50,100], "max_depth":[4,6,8]},
+        #                 scoring=kt_score,
+        #                 cv=11
+        #             )
+        #         )
+        #     elif name == "IBM":
+        #         if self.dataset.train_together:
+        #             metric = "euclidean"
+        #         else:
+        #             metric = "precomputed"
+        #         self.list_of_algorithms.append(IBLR_M(n_neighbors=3, metric=metric))
+        #     elif name == "IBPL":
+        #         if self.dataset.train_together:
+        #             metric = "euclidean"
+        #         else:
+        #             metric = "precomputed"
+        #         self.list_of_algorithms.append(IBLR_PL(n_neighbors=3, metric=metric))
 
     def _processing_before_logging(self, model, X_test, y_yield_test):
         if type(self.dataset) == dataloader.DeoxyDataset:

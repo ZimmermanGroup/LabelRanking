@@ -1,6 +1,7 @@
 import argparse
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
+from sklr.tree import DecisionTreeLabelRanker
 
 from dataloader import *
 from evaluator import *
@@ -82,13 +83,15 @@ def parse_args():
     return args
 
 
-def parse_algorithms(parser):
+def parse_algorithms(parser, inner_ps=None):
     """For label ranking and classifier algorithm, goes through the parser
     to prepare a list of algorithm names to conduct.
 
     Parameters
     ----------
     parser: argparse object.
+    inner_ps : PredefinedSplit object.
+        Splits to train the algorithms.
 
     Returns
     -------
@@ -116,6 +119,57 @@ def parse_algorithms(parser):
     if parser.knn:
         classifiers.append("KNN")
     return lr_algorithms, classifiers
+
+
+def lr_names_to_model_objs(lr_names, inner_ps):
+    """ Changes list of algorithm names into objects to train.
+    
+    Parameters
+    ----------
+    lr_names : list of str
+        Names of label ranking algorithms to consider.
+    
+    Returns
+    -------
+    lr_objs : list of GridSearchCV objects.
+    """
+    convert_dict = {
+        "RPC":GridSearchCV(
+                RPC(),
+                param_grid = {
+                    "C":[0.1,0.3,1,3,10],
+                    "penalty":["l1","l2"]
+                },
+                scoring=rr_score,
+                cv=inner_ps,
+                n_jobs=-1
+            ),
+        "LRT":DecisionTreeLabelRanker(
+                random_state=42, min_samples_split=4 * 2  # might need to change
+            ),
+        "LRRF":GridSearchCV(
+                LabelRankingRandomForest(),
+                param_grid = {"n_estimators":[25,50,100], "max_depth":[4,6,8]},
+                scoring=rr_score,
+                cv=inner_ps,
+                n_jobs=-1
+            ),
+        "IBM":GridSearchCV(
+                IBLR_M(),
+                param_grid={"n_neighbors":[3,5,10]},
+                scoring=rr_score,
+                cv=inner_ps,
+                n_jobs=-1
+            ),
+        "IBPL":GridSearchCV(
+                IBLR_PL(),
+                param_grid={"n_neighbors":[3,5,10]},
+                scoring=rr_score,
+                cv=inner_ps,
+                n_jobs=-1
+            )
+    }
+    return [convert_dict[x] for x in lr_names]
 
 
 def run_nature(parser):
@@ -173,10 +227,9 @@ def run_nature(parser):
             outer_ps,
             parser.n_missing_reaction,
             n_evals
-        )
-        regressor_CV = evaluator.train_and_evaluate_models()
+        ).train_and_evaluate_models()
         # regressor_validation = evaluator.external_validation()
-        perf_dicts.append(regressor_CV.perf_dict)
+        perf_dicts.append(evaluator.perf_dict)
         # perf_dicts.append(regressor_validation.perf_dict)
     if parser.baseline or len(lr_algorithms) > 0 or len(classifiers) > 0:
         dataset = NatureDataset(False, label_component, n_rxns)
@@ -189,10 +242,14 @@ def run_nature(parser):
             perf_dicts.append(baseline_CV.perf_dict)
             # perf_dicts.append(baseline_validation.valid_dict)
         if len(lr_algorithms) > 0:
+            inner_ps = PredefinedSplit(np.arange(onehot_array.shape[0]-1))
+            lr_names = deepcopy(lr_algorithms)
+            lr_algorithms = lr_names_to_model_objs(lr_algorithms, inner_ps)
             label_ranking_evaluator = LabelRankingEvaluator(
                 dataset,
                 parser.feature,
                 n_rxns,
+                lr_names,
                 lr_algorithms,
                 ps,
                 parser.n_missing_reaction,
@@ -290,17 +347,20 @@ def run_informer(parser):
             ps = PredefinedSplit(np.repeat(np.arange(11), n_other_component))
         else:
             ps = [PredefinedSplit(np.arange(11))] * n_other_component
+            inner_ps = PredefinedSplit(np.arange(10))
         if parser.baseline:
             baseline_evaluator = BaselineEvaluator(
                 dataset, n_rxns, ps, parser.n_missing_reaction, n_evals
             ).train_and_evaluate_models()
             perf_dicts.append(baseline_evaluator.perf_dict)
         if len(lr_algorithms) > 0:
+            lr_algorithm_objs = lr_names_to_model_objs(lr_algorithms, inner_ps)
             label_ranking_evaluator = LabelRankingEvaluator(
                 dataset,
                 parser.feature,
                 n_rxns,
                 lr_algorithms,
+                lr_algorithm_objs,
                 ps,
                 parser.n_missing_reaction,
                 n_evals
@@ -399,17 +459,20 @@ def run_deoxy(parser):
                 ps = PredefinedSplit(np.arange(32))
         else:
             ps = [PredefinedSplit(np.arange(32))] * n_other_component
+            inner_ps = PredefinedSplit(np.arange(31))
         if parser.baseline:
             baseline_evaluator = BaselineEvaluator(
                 dataset, n_rxns, ps, parser.n_missing_reaction, n_evals
             ).train_and_evaluate_models()
             perf_dicts.append(baseline_evaluator.perf_dict)
         if len(lr_algorithms) > 0:
+            lr_algorithm_objs = lr_names_to_model_objs(lr_algorithms, inner_ps)
             label_ranking_evaluator = LabelRankingEvaluator(
                 dataset,
                 parser.feature,
                 n_rxns,
                 lr_algorithms,
+                lr_algorithm_objs,
                 ps,
                 parser.n_missing_reaction,
                 n_evals
