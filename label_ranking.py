@@ -11,6 +11,8 @@ from sklearn.metrics import make_scorer
 from scipy.stats import kendalltau, mstats
 from math import log
 from rank_aggregation import *
+import warnings
+warnings.filterwarnings("ignore")
 
 ### We deal with y as rankings, not scores or preferences. The smaller values, the better.
 

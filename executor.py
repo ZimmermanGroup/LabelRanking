@@ -5,6 +5,8 @@ from sklr.tree import DecisionTreeLabelRanker
 
 from dataloader import *
 from evaluator import *
+import warnings
+warnings.filterwarnings("ignore")
 
 np.random.seed(42)
 N_EVALS = 10
@@ -137,10 +139,10 @@ def lr_names_to_model_objs(lr_names, inner_ps):
         "RPC":GridSearchCV(
                 RPC(),
                 param_grid = {
-                    "C":[0.1,0.3,1,3,10],
-                    "penalty":["l1","l2"]
+                    "C":[0.1,0.3,1,3,10], #0.1,0.3,,3,10
+                    "penalty":["l1","l2"] #"l1",
                 },
-                scoring=rr_score,
+                scoring=kt_score,
                 cv=inner_ps,
                 n_jobs=-1
             ),
@@ -149,22 +151,22 @@ def lr_names_to_model_objs(lr_names, inner_ps):
             ),
         "LRRF":GridSearchCV(
                 LabelRankingRandomForest(),
-                param_grid = {"n_estimators":[25,50,100], "max_depth":[4,6,8]},
-                scoring=rr_score,
+                param_grid = {"n_estimators":[25,50,100], "max_depth":[4,6,8]}, #25,,100  4,6,
+                scoring=kt_score,
                 cv=inner_ps,
                 n_jobs=-1
             ),
         "IBM":GridSearchCV(
                 IBLR_M(),
-                param_grid={"n_neighbors":[3,5,10]},
-                scoring=rr_score,
+                param_grid={"n_neighbors":[3,5,10]}, #,5,10
+                scoring=kt_score,
                 cv=inner_ps,
                 n_jobs=-1
             ),
         "IBPL":GridSearchCV(
                 IBLR_PL(),
-                param_grid={"n_neighbors":[3,5,10]},
-                scoring=rr_score,
+                param_grid={"n_neighbors":[3,5,10]}, #,5,10
+                scoring=kt_score,
                 cv=inner_ps,
                 n_jobs=-1
             )
