@@ -137,7 +137,37 @@ class RPC(BaseEstimator):
         order = np.argsort(-np.sum(score_array, axis=2), axis=1)
         rank = np.argsort(order, axis=1) + np.ones_like(order)
         return rank
+    
+    def predict_proba(self, X):
+        """ Builds a matrix of preference probability between all column pairs.
+        
+        Parameters
+        ----------
+        X : np.ndarray of shape (n_samples, n_features)
+            Input array.
+              
+        Returns
+        -------
+        probability_array : np.ndarray of shape (n_samples, n_labels, n_labels)
+        """
+        score_array = np.zeros((X.shape[0], self.n_labels, self.n_labels))
+        for column_combination, model in self.learner_by_column_pair.items():
+            # assert column_combination[0] < column_combination[1]
+            if type(model) == int:
+                score_array[
+                    :, column_combination[model], column_combination[1 - model]
+                ] = 1
 
+            else:
+                proba = model.predict_proba(X)
+                score_array[:, column_combination[1], column_combination[0]] = proba[
+                    :, 1
+                ]
+                score_array[:, column_combination[0], column_combination[1]] = proba[
+                    :, 0
+                ]
+        return score_array
+    
 
 class IBLR_M(BaseEstimator):
     """Reproduces the instance based label ranking with the probabilistic mallows model, proposed in
