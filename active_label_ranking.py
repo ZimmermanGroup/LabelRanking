@@ -25,7 +25,7 @@ def parse_args():
     )
     parser.add_argument(
         "--strategy",
-        choices=["substrate_first", "condition_first", "lowest_diff", "random", "full_rf", "full_rpc"],
+        choices=["condition_first", "lowest_diff", "random", "full_rfr", "full_rpc"],
         help="Which AL acquisition strategy to use."
     )
     parser.add_argument(
@@ -353,6 +353,42 @@ def iteration_of_cond_first(X, y_ranking, train_inds, rem_inds, predicted_proba_
     return X_acquired, y_ranking_acquired, next_subs_inds
 
 
+def iteration_of_random(X, y_ranking, rem_inds, n_subs_to_sample, n_conds_to_sample):
+    """ Selects substrates and reaction conditions randomly, for baseline purposes.
+    
+    Parameters
+    ----------
+    X : np.ndarray of shape (n_substrates, n_features)
+        Full input array.
+    y_ranking : np.ndarray of shape (n_substrates, n_rxn_conditions)
+        Ranking array of all substrates.
+    train_inds : list of ints
+        Indices selected for the training set candidates.
+    rem_inds : list of ints
+        Indices that are still available for sampling.
+    n_subs_to_sample : int
+        Number of substrates to sample.
+    n_conds_to_sample : int
+        Number of reaction conditions to sample for one substrate.
+    smiles_list : list of str
+        List of smiles strings in the TRAINING dataset.
+
+    Returns
+    -------
+    X_acquired : np.ndarray of shape (n_subs_to_sample, n_features)
+        Input array of the substrates that were subject to data collection.
+    y_ranking_acquired : np.ndarray of shape (n_subs_to_sample, n_conds)
+        Ranking array of what the experimentalist would see.
+        Unsampled reaction conditions have np.nan
+    next_subs_inds : np.ndarray of shape (n_subs_to_sample,)
+        Indices from REM_INDS that have been sampled in this iteration.
+    """
+    next_subs_inds = np.random.choice(np.arange(len(rem_inds)), n_subs_to_sample, replace=False)
+    next_cond_inds = np.random.randint(0, y_ranking.shape[1], size=(n_subs_to_sample, n_conds_to_sample))
+    X_acquired = X[next_subs_inds]
+    y_ranking_acquired = get_y_acquired(y_ranking, rem_inds, next_subs_inds, next_cond_inds)
+    return X_acquired, y_ranking_acquired, next_subs_inds
+
 def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
     """ Conducts loops of active learning until all substrates have been sampled.
     
@@ -379,7 +415,7 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
         "Evaluation Iteration":[],
         "Initialization Iteration":[]
     }
-    for n_iter in tqdm(range(parser.n_evals)) :
+    for n_iter in tqdm(range(parser.n_evals)) : # Train test splits
         train_inds, test_inds = get_train_test_inds(y_ranking, parser.n_test_subs)
         X_test = X[test_inds]
         y_test = y_ranking[test_inds]
@@ -387,58 +423,79 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
         train_smiles = [x for i, x in enumerate(smiles_list) if i in train_inds]
 
         if parser.initialization == "random":
-            n_init = 25
+            n_init = parser.n_evals
         else :
-            n_init = 1
-
-        for n in range(n_init) :
-            initial_inds, rem_inds = initial_substrate_selection(
-                parser.initialization, 
-                train_inds, 
-                parser.n_initial_subs, 
-                smiles_list=train_smiles
-            )
-            # print("INTIAL INDS", len(initial_inds), "REMAINING INDS", len(rem_inds))
-            X_sampled = X[initial_inds]
-            y_sampled = y_ranking[initial_inds]
-
-            rpc = RPC()
-            rpc.fit(X_sampled, y_sampled)
-            y_pred = rpc.predict(X_test)
-            rem_proba_array = rpc.predict_proba(X[rem_inds])
-            
-            while len(rem_inds) > 2 :
-                rr_score = rr(y_test_yield, y_test, y_pred)
-                kt_score = kt(y_test, y_pred)
-                update_perf_dict(
-                    perf_dict, rr_score, kt_score, 
-                    y_sampled.shape[0], n_iter, n
+            if parser.strategy != "random" :
+                n_init = 1
+            else :
+                n_init = parser.n_evals
+        
+        if parser.strategy != "full_rpc":
+            for n in range(n_init) : # Initializations
+                initial_inds, rem_inds = initial_substrate_selection(
+                    parser.initialization, 
+                    train_inds, 
+                    parser.n_initial_subs, 
+                    smiles_list=train_smiles
                 )
-                if parser.strategy == "lowest_diff" : 
-                    X_acquired, y_ranking_acquired, next_subs_inds = iteration_of_lowest_diff(
-                        X, y_ranking, 
-                        rem_inds, rem_proba_array, 
-                        parser.n_subs_to_sample, 
-                        parser.n_conds_to_sample
-                    )
-                elif parser.strategy == "condition_first":
-                    X_acquired, y_ranking_acquired, next_subs_inds = iteration_of_cond_first(
-                        X, y_ranking, 
-                        train_inds,
-                        rem_inds, rem_proba_array, 
-                        parser.n_subs_to_sample, 
-                        parser.n_conds_to_sample,
-                        train_smiles
-                    )
-                    # print("NEXT SUBS INDS", next_subs_inds)
-                X_sampled = np.vstack((X_sampled, X_acquired))
-                y_sampled = np.vstack((y_sampled, y_ranking_acquired))
-                rem_inds = [x for i, x in enumerate(rem_inds) if i not in next_subs_inds]
-                # print("ALL REMAINING INDS", rem_inds, len(rem_inds))
-                # print()
+                # print("INTIAL INDS", len(initial_inds), "REMAINING INDS", len(rem_inds))
+                X_sampled = X[initial_inds]
+                y_sampled = y_ranking[initial_inds]
+
+                rpc = RPC()
                 rpc.fit(X_sampled, y_sampled)
                 y_pred = rpc.predict(X_test)
                 rem_proba_array = rpc.predict_proba(X[rem_inds])
+                
+                while len(rem_inds) > 2 :
+                    rr_score = rr(y_test_yield, y_test, y_pred)
+                    kt_score = kt(y_test, y_pred)
+                    update_perf_dict(
+                        perf_dict, rr_score, kt_score, 
+                        y_sampled.shape[0], n_iter, n
+                    )
+                    if parser.strategy == "lowest_diff" : 
+                        X_acquired, y_ranking_acquired, next_subs_inds = iteration_of_lowest_diff(
+                            X, y_ranking, 
+                            rem_inds, rem_proba_array, 
+                            parser.n_subs_to_sample, 
+                            parser.n_conds_to_sample
+                        )
+                    elif parser.strategy == "condition_first":
+                        X_acquired, y_ranking_acquired, next_subs_inds = iteration_of_cond_first(
+                            X, y_ranking, 
+                            train_inds,
+                            rem_inds, rem_proba_array, 
+                            parser.n_subs_to_sample, 
+                            parser.n_conds_to_sample,
+                            train_smiles
+                        )
+                    elif parser.strategy == "random":
+                        X_acquired, y_ranking_acquired, next_subs_inds = iteration_of_random(
+                            X, y_ranking, 
+                            rem_inds, 
+                            parser.n_subs_to_sample, 
+                            parser.n_conds_to_sample
+                        )
+
+                    X_sampled = np.vstack((X_sampled, X_acquired))
+                    y_sampled = np.vstack((y_sampled, y_ranking_acquired))
+                    rem_inds = [x for i, x in enumerate(rem_inds) if i not in next_subs_inds]
+                    # print("ALL REMAINING INDS", rem_inds, len(rem_inds))
+                    # print()
+                    rpc.fit(X_sampled, y_sampled)
+                    y_pred = rpc.predict(X_test)
+                    rem_proba_array = rpc.predict_proba(X[rem_inds])
+        else :
+            X_train = X[train_inds]
+            y_train = y_ranking[train_inds]
+            rpc = RPC()
+            rpc.fit(X_train, y_train)
+            y_pred = rpc.predict(X_test)
+            update_perf_dict(
+                perf_dict, rr(y_test_yield, y_test, y_pred), kt(y_test, y_pred), 
+                y_train.shape[0], n_iter, 0
+            )
     return perf_dict
 
 
