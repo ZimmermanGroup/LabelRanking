@@ -25,7 +25,7 @@ def parse_args():
     )
     parser.add_argument(
         "--strategy",
-        choices=["substrate_first", "condition_first", "lowest_diff"],
+        choices=["substrate_first", "condition_first", "lowest_diff", "random", "full_rf", "full_rpc"],
         help="Which AL acquisition strategy to use."
     )
     parser.add_argument(
@@ -134,7 +134,7 @@ def get_train_test_inds(y_ranking, n_test_cases):
     train_inds = [x for x in range(y_ranking.shape[0]) if x not in test_inds]
     return train_inds, test_inds
 
-def initial_substrate_selection(initialization, train_inds, n_initial_subs, X_train=None):
+def initial_substrate_selection(initialization, train_inds, n_initial_subs, smiles_list=None):
     """ Selects the initial set of substrates to sample with all reaction conditions.
 
     Parameters
@@ -149,8 +149,8 @@ def initial_substrate_selection(initialization, train_inds, n_initial_subs, X_tr
     n_initial_subs : int
         Number of substrates to sample.
 
-    X_train : np.ndarray of shape (n_substrates, n_features) or list of smiles
-        List of smiles - used for cluster.
+    smiles_list : list of str
+        List of smiles in the TRAINING dataset.
 
     Returns
     -------
@@ -165,7 +165,7 @@ def initial_substrate_selection(initialization, train_inds, n_initial_subs, X_tr
 
     elif initialization == "cluster":
         mfpgen = rdFingerprintGenerator.GetMorganGenerator(fpSize=1024, radius=3)
-        fp_list = [mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in X_train]
+        fp_list = [mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in smiles_list]
         dists = []
         for i in range(1, len(fp_list)) :
             similarities = DataStructs.BulkTanimotoSimilarity(
@@ -175,23 +175,56 @@ def initial_substrate_selection(initialization, train_inds, n_initial_subs, X_tr
             dists.extend([1-x for x in similarities])
         ### Gets the distance threshold that has highest number of membership in the
         ### n_initial_subs-th cluster
-        largest_cluster = 0
-        n_members = 0
-        clusters_to_use = None
-        for i in range(3,8) :
+        cluster_membership = np.zeros((4, n_initial_subs))
+        all_clusters = []
+        for i in range(5,9) :
             clusters = Butina.ClusterData(dists, len(fp_list), 0.1*i, isDistData=True)
-            n_elements_in_each_cluster = sorted([len(x) for x in clusters if len(x) > 1])[::-1]
-            if len(n_elements_in_each_cluster) >= n_initial_subs :
-                if n_elements_in_each_cluster[n_initial_subs - 1] > n_members :
-                    n_members = n_elements_in_each_cluster[n_initial_subs - 1]
-                    largest_cluster = i
-                    clusters_to_use = clusters
+            non_single_clusters = sorted([len(x) for x in clusters if len(x) > 1])[::-1]
+            if len(non_single_clusters) >= n_initial_subs : 
+                cluster_membership[i-5] = non_single_clusters[:n_initial_subs]
+            else : 
+                cluster_membership[i-5, :len(non_single_clusters)] = non_single_clusters
+            all_clusters.append(clusters)    
+        selected = False
+        while not selected :
+            for i in range(1, n_initial_subs+1) :
+                if np.any(cluster_membership[:, -1*i]) > 0 :
+                    clusters_to_use = all_clusters[np.argmax(cluster_membership[:, -1 * i])]
+                    selected = True
         initial_inds = [
-            cluster[0] for cluster in clusters_to_use if len(cluster) >= n_members
-        ]  
-
+            train_inds[cluster[0]] for cluster in clusters_to_use[:n_initial_subs]
+        ][:n_initial_subs]
     rem_inds = [x for x in train_inds if x not in initial_inds]
     return initial_inds, rem_inds
+
+
+def get_y_acquired(y_ranking, rem_inds, next_subs_inds, next_cond_inds):
+    """ Prepares the partial ranking array.
+    
+    Parameters
+    ----------
+    y_ranking : np.ndarray of shape (n_substrates, n_conds)
+        Full ranking array of all data.
+    rem_inds : list of ints
+        Indices that are still available to sample for training data.
+    next_subs_inds : list of ints
+        Indices of substrates that are sampled.
+    next_cond_inds : np.ndarray of shape (len(next_subs_inds), n_conds_to_sample)
+        Indices of conditions selected for each substrate.
+
+    Returns
+    -------
+    y_ranking_acquired : np.ndarray of shape (len(next_subs_inds), n_conds)
+        Acquired partial ranking array.
+    """
+    y_ranking_acquired = deepcopy(y_ranking[[rem_inds[x] for x in next_subs_inds]]).astype(float)
+    for i, row in enumerate(next_cond_inds) :
+        inds_to_cover = [x for x in range(y_ranking.shape[1]) if x not in row]
+        y_ranking_acquired[i, inds_to_cover] = np.nan
+        y_ranking_acquired[i] = rankdata(y_ranking_acquired[i])
+        y_ranking_acquired[i, inds_to_cover] = np.nan
+    return y_ranking_acquired
+
 
 
 def iteration_of_lowest_diff(X, y_ranking, rem_inds, predicted_proba_array, n_subs_to_sample, n_conds_to_sample):
@@ -235,13 +268,88 @@ def iteration_of_lowest_diff(X, y_ranking, rem_inds, predicted_proba_array, n_su
     next_cond_inds = top_k_conds[next_subs_inds, :]
 
     X_acquired = X[[rem_inds[x] for x in next_subs_inds]]
-    y_ranking_acquired = deepcopy(y_ranking[[rem_inds[x] for x in next_subs_inds]]).astype(float)
-    for i, row in enumerate(next_cond_inds) :
-        inds_to_cover = [x for x in range(y_ranking.shape[1]) if x not in row]
-        y_ranking_acquired[i, inds_to_cover] = np.nan
-        y_ranking_acquired[i] = rankdata(y_ranking_acquired[i])
-        y_ranking_acquired[i, inds_to_cover] = np.nan
+    y_ranking_acquired = get_y_acquired(y_ranking, rem_inds, next_subs_inds, next_cond_inds)
+    return X_acquired, y_ranking_acquired, next_subs_inds
+
+
+def iteration_of_cond_first(X, y_ranking, train_inds, rem_inds, predicted_proba_array, n_subs_to_sample, n_conds_to_sample, smiles_list):
+    """ First gets a pair of reactions where the average of predicted probability's deviation from 0.5 
+     is smallest, across all candidates.
+    Then select two substrates with the lowest Tanimoto similarity to those sampled.
     
+    Parameters
+    ----------
+    X : np.ndarray of shape (n_substrates, n_features)
+        Full input array.
+    y_ranking : np.ndarray of shape (n_substrates, n_rxn_conditions)
+        Ranking array of all substrates.
+    train_inds : list of ints
+        Indices selected for the training set candidates.
+    rem_inds : list of ints
+        Indices that are still available for sampling.
+    predicted_proba_array : np.ndarray of shape (n_substrates, n_conditions, n_conditions)
+        Element at row i, column j corresponds to the RPC's predicted score of condition i being
+        favorable over condition j.
+    n_subs_to_sample : int
+        Number of substrates to sample.
+    n_conds_to_sample : int
+        Number of reaction conditions to sample for one substrate.
+    smiles_list : list of str
+        List of smiles strings in the TRAINING dataset.
+
+    Returns
+    -------
+    X_acquired : np.ndarray of shape (n_subs_to_sample, n_features)
+        Input array of the substrates that were subject to data collection.
+    y_ranking_acquired : np.ndarray of shape (n_subs_to_sample, n_conds)
+        Ranking array of what the experimentalist would see.
+        Unsampled reaction conditions have np.nan
+    next_subs_inds : np.ndarray of shape (n_subs_to_sample,)
+        Indices from REM_INDS that have been sampled in this iteration.
+    """
+    sampled_smiles = []
+    rem_smiles = []
+    for i, smiles in enumerate(smiles_list) :
+        if train_inds[i] in rem_inds : 
+            rem_smiles.append(smiles)
+        else :
+            sampled_smiles.append(smiles)
+    # print("LEN SMILES", len(sampled_smiles), len(rem_smiles))
+    avg_deviation = np.mean(np.abs(predicted_proba_array - 0.5), axis=0)
+    inds = np.unravel_index(
+        np.argsort(avg_deviation, axis=None),
+        (predicted_proba_array.shape[1], predicted_proba_array.shape[2])
+    )
+    conds = [inds[0][0], inds[0][1]]
+    while len(conds) < n_conds_to_sample :
+        rem_conds = [x for x in range(avg_deviation.shape[1]) if x not in conds]
+        conds.append(np.argmin(np.mean(avg_deviation[rem_conds, conds], axis=1)))
+    next_cond_inds = np.repeat(np.array(conds).reshape(1,-1), n_subs_to_sample, axis=0)
+    
+    next_subs_inds = []
+    mfpgen = rdFingerprintGenerator.GetMorganGenerator(fpSize=1024, radius=3)
+    while len(next_subs_inds) < n_subs_to_sample :
+        sampled_fp = [mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in sampled_smiles]
+        rem_fp = [mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in rem_smiles]
+        dists = np.zeros((len(rem_fp), len(sampled_fp)))
+        for i, fp in enumerate(rem_fp) :
+            dists[i] = 1 - np.array(DataStructs.BulkTanimotoSimilarity(
+                fp, 
+                sampled_fp
+            ))
+        sorted_inds = np.argsort(np.mean(dists, axis=1))[::-1]
+        if len(next_subs_inds) > 0 :
+            for ind in sorted_inds :
+                if ind not in next_subs_inds : 
+                    farthest_ind = ind
+                    break
+        else :
+            farthest_ind = sorted_inds[0]
+        next_subs_inds.append(farthest_ind)
+        sampled_fp.append(rem_fp[farthest_ind])
+    
+    X_acquired = X[[rem_inds[x] for x in next_subs_inds]]
+    y_ranking_acquired = get_y_acquired(y_ranking, rem_inds, next_subs_inds, next_cond_inds)
     return X_acquired, y_ranking_acquired, next_subs_inds
 
 
@@ -276,24 +384,21 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
         X_test = X[test_inds]
         y_test = y_ranking[test_inds]
         y_test_yield = y_yield[test_inds]
+        train_smiles = [x for i, x in enumerate(smiles_list) if i in train_inds]
 
         if parser.initialization == "random":
             n_init = 25
-            X_train = None
         else :
             n_init = 1
-            if parser.initialization == "cluster":
-                X_train = smiles_list
 
         for n in range(n_init) :
             initial_inds, rem_inds = initial_substrate_selection(
                 parser.initialization, 
                 train_inds, 
                 parser.n_initial_subs, 
-                X_train=X_train
+                smiles_list=train_smiles
             )
-            print(initial_inds.shape)
-            print(type(initial_inds[0][0]))
+            # print("INTIAL INDS", len(initial_inds), "REMAINING INDS", len(rem_inds))
             X_sampled = X[initial_inds]
             y_sampled = y_ranking[initial_inds]
 
@@ -316,9 +421,21 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                         parser.n_subs_to_sample, 
                         parser.n_conds_to_sample
                     )
+                elif parser.strategy == "condition_first":
+                    X_acquired, y_ranking_acquired, next_subs_inds = iteration_of_cond_first(
+                        X, y_ranking, 
+                        train_inds,
+                        rem_inds, rem_proba_array, 
+                        parser.n_subs_to_sample, 
+                        parser.n_conds_to_sample,
+                        train_smiles
+                    )
+                    # print("NEXT SUBS INDS", next_subs_inds)
                 X_sampled = np.vstack((X_sampled, X_acquired))
                 y_sampled = np.vstack((y_sampled, y_ranking_acquired))
                 rem_inds = [x for i, x in enumerate(rem_inds) if i not in next_subs_inds]
+                # print("ALL REMAINING INDS", rem_inds, len(rem_inds))
+                # print()
                 rpc.fit(X_sampled, y_sampled)
                 y_pred = rpc.predict(X_test)
                 rem_proba_array = rpc.predict_proba(X[rem_inds])
