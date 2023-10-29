@@ -256,7 +256,7 @@ class NatureDataset(Dataset):
         return self._y_yield
 
     def _sort_yield_by_substrate(self):
-        """Prepares an array of yields where each row and column correspond to 
+        """Prepares an array of yields where each row and column correspond to
         a substrate and reactions conditions, respectively."""
         array = np.zeros((len(self.smiles_list), len(self.cats) * len(self.bases)))
         for i, row in self.df.iterrows():

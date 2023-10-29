@@ -12,13 +12,17 @@ from scipy.stats import kendalltau, mstats
 from math import log
 from rank_aggregation import *
 import warnings
+
 warnings.filterwarnings("ignore")
 
 ### We deal with y as rankings, not scores or preferences. The smaller values, the better.
 
+
 def kendall_tau(y_true, y_pred):
     kt = kendalltau(y_true, y_pred).statistic
     return kt
+
+
 kt_score = make_scorer(kendall_tau, greater_is_better=True)
 
 
@@ -88,15 +92,15 @@ class RPC(BaseEstimator):
                 # model = deepcopy(self.base_learner)
                 model = LogisticRegression(
                     penalty=self.penalty,
-                    C = self.C,
+                    C=self.C,
                     random_state=self.random_state,
-                    solver = self.solver
+                    solver=self.solver,
                 )
                 model.fit(sub_X, sub_preference)
                 # else:
                 #     self.cross_validator.fit(sub_X, sub_preference)
                 #     model = self.cross_validator.best_estimator_
-                    # print(self.cross_validator.best_params_)
+                # print(self.cross_validator.best_params_)
                 self.learner_by_column_pair.update({column_combination: model})
             # If there one label constantly is preferred over the other
             elif len(sub_preference) > 0:
@@ -137,15 +141,15 @@ class RPC(BaseEstimator):
         order = np.argsort(-np.sum(score_array, axis=2), axis=1)
         rank = np.argsort(order, axis=1) + np.ones_like(order)
         return rank
-    
+
     def predict_proba(self, X):
-        """ Builds a matrix of preference probability between all column pairs.
-        
+        """Builds a matrix of preference probability between all column pairs.
+
         Parameters
         ----------
         X : np.ndarray of shape (n_samples, n_features)
             Input array.
-              
+
         Returns
         -------
         probability_array : np.ndarray of shape (n_samples, n_labels, n_labels)
@@ -167,7 +171,7 @@ class RPC(BaseEstimator):
                     :, 0
                 ]
         return score_array
-    
+
 
 class IBLR_M(BaseEstimator):
     """Reproduces the instance based label ranking with the probabilistic mallows model, proposed in
@@ -482,9 +486,9 @@ class LabelRankingRandomForest(BaseEstimator):
         self.n_estimators = n_estimators
         self.max_depth = max_depth
         # self.cross_validator = cross_validator
-    
+
     def get_params(self, deep=True):
-        return {"n_estimators":self.n_estimators, "max_depth":self.max_depth}
+        return {"n_estimators": self.n_estimators, "max_depth": self.max_depth}
 
     def set_params(self, **parameters):
         for parameter, value in parameters.items():

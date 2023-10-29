@@ -21,6 +21,7 @@ PERFORMANCE_DICT = {
 }
 np.random.seed(42)
 
+
 class Evaluator(ABC):
     """Base class for evaluators for various types of algorithsm.
 
@@ -223,33 +224,30 @@ class Evaluator(ABC):
         pass
 
     def _random_selection_of_inds_to_erase(self):
-        """ Prepares an array of random numbers between 0 and 1 to be used to
-        erase the same reactions across regression and label ranking models. 
-        
+        """Prepares an array of random numbers between 0 and 1 to be used to
+        erase the same reactions across regression and label ranking models.
+
         Currently hard-coding the shape of the array generated."""
         list_of_inds_to_cover = []
-        if type(self.dataset) == dataloader.NatureDataset :
+        if type(self.dataset) == dataloader.NatureDataset:
             if self.dataset.component_to_rank == "amine":
                 shape = (53, self.dataset.n_rank_component)
-            else :
+            else:
                 shape = (18, self.dataset.n_rank_component)
-        elif type(self.dataset) == dataloader.DeoxyDataset :
+        elif type(self.dataset) == dataloader.DeoxyDataset:
             shape = (31, self.dataset.n_rank_component)
-        elif type(self.dataset) == dataloader.InformerDataset :
+        elif type(self.dataset) == dataloader.InformerDataset:
             shape = (10, self.dataset.n_rank_component)
-        for i in range(self.n_evaluations) :
+        for i in range(self.n_evaluations):
             random_numbers = np.random.rand(shape[0], shape[1])
-            list_of_inds_to_cover.append((
-                np.repeat(
-                    np.arange(shape[0]),
-                    self.n_rxns_to_erase
-                ).flatten(),
-                np.argpartition(
-                    random_numbers, 
-                    kth=self.n_rxns_to_erase, 
-                    axis=1
-                )[:, :self.n_rxns_to_erase].flatten()
-            ))
+            list_of_inds_to_cover.append(
+                (
+                    np.repeat(np.arange(shape[0]), self.n_rxns_to_erase).flatten(),
+                    np.argpartition(random_numbers, kth=self.n_rxns_to_erase, axis=1)[
+                        :, : self.n_rxns_to_erase
+                    ].flatten(),
+                )
+            )
         return list_of_inds_to_cover
 
     def _CV_loops(
@@ -293,57 +291,63 @@ class Evaluator(ABC):
                 y_yield_train = y_yield[train_ind]
             print()
             print("Compound", a)
-            if self.n_rxns_to_erase >= 1 :
+            if self.n_rxns_to_erase >= 1:
                 list_of_inds_to_erase = self._random_selection_of_inds_to_erase()
             for eval_loop_num in range(self.n_evaluations):
                 print("EVALUATION #", eval_loop_num)
-                if self.n_rxns_to_erase >= 1 :
+                if self.n_rxns_to_erase >= 1:
                     # Need this block again so that we use the original arrays for different evaluations.
                     if X is not None:
                         X_train = std.transform(X[train_ind, :])
                     y_train, y_test = y[train_ind], y[test_ind]
                     inds_to_erase = list_of_inds_to_erase[eval_loop_num]
                     # For regressors
-                    if type(self) == RegressorEvaluator :
+                    if type(self) == RegressorEvaluator:
                         inds_to_remove = []
-                        inds_to_remove.extend([
-                            self.dataset.n_rank_component * row_num + col_num \
-                                for row_num, col_num in zip(inds_to_erase[0], inds_to_erase[1])
-                        ])
-                        inds_to_keep = [x for x in range(len(y_train)) if x not in inds_to_remove]
+                        inds_to_remove.extend(
+                            [
+                                self.dataset.n_rank_component * row_num + col_num
+                                for row_num, col_num in zip(
+                                    inds_to_erase[0], inds_to_erase[1]
+                                )
+                            ]
+                        )
+                        inds_to_keep = [
+                            x for x in range(len(y_train)) if x not in inds_to_remove
+                        ]
                         y_train = y_train[inds_to_keep]
                         X_train = X_train[inds_to_keep]
-                        if a == 0 : print("PROCESSED X TRAIN SHAPE", X_train.shape)
-                    elif type(self) == MulticlassEvaluator :
+                        if a == 0:
+                            print("PROCESSED X TRAIN SHAPE", X_train.shape)
+                    elif type(self) == MulticlassEvaluator:
                         y_train_missing = deepcopy(y_yield_train).astype(float)
                         y_train_missing[inds_to_erase] = np.nan
                         y_train = np.nanargmax(y_train_missing, axis=1)
                     # For label ranking
-                    else :
+                    else:
                         y_train_missing = deepcopy(y_train).astype(float)
                         y_train_missing[inds_to_erase] = np.nan
-                        if type(self) == LabelRankingEvaluator :
+                        if type(self) == LabelRankingEvaluator:
                             y_train = mstats.rankdata(
                                 np.ma.masked_invalid(y_train_missing), axis=1
                             )
                             y_train[y_train == 0] = np.nan
                             # print("YTRAIN", y_train_missing)
-                        elif type(self) == BaselineEvaluator :
+                        elif type(self) == BaselineEvaluator:
                             y_train = np.nanmean(y_train_missing, axis=0)
                             X_train = y_train
                             X_test = y_train_missing
-                        elif type(self) == MultilabelEvaluator :
+                        elif type(self) == MultilabelEvaluator:
                             y_yield_train = y_yield[train_ind]
                             y_train_missing = deepcopy(y_yield_train).astype(float)
                             y_train_missing[inds_to_erase] = np.nan
                             # print("YTRAIN", y_train_missing)
-                            nonzero_inds = np.argpartition(-1*y_train_missing, self.n_rxns, axis=1)[:, :self.n_rxns]
+                            nonzero_inds = np.argpartition(
+                                -1 * y_train_missing, self.n_rxns, axis=1
+                            )[:, : self.n_rxns]
                             y_train = np.zeros_like(y_train_missing)
-                            for row_num, col_nums in enumerate(nonzero_inds) :
-                                y_train[
-                                    np.array([row_num]*self.n_rxns),
-                                    col_nums
-                                ] = 1
+                            for row_num, col_nums in enumerate(nonzero_inds):
+                                y_train[np.array([row_num] * self.n_rxns), col_nums] = 1
                             # print("MULTILABEL YTRAIN", y_train)
 
                 for b, (model, model_name) in enumerate(
@@ -380,7 +384,8 @@ class Evaluator(ABC):
                         # to the model, use Tanimoto distances.
                         elif (
                             type(model) == GridSearchCV
-                            and type(model.estimator) in [KNeighborsClassifier, IBLR_M, IBLR_PL]
+                            and type(model.estimator)
+                            in [KNeighborsClassifier, IBLR_M, IBLR_PL]
                             # or type(model) in [IBLR_M, IBLR_PL]
                         ) and not self.dataset.train_together:
                             dist_array = self.dataset.X_dist
@@ -401,14 +406,17 @@ class Evaluator(ABC):
                     elif (
                         type(model) == GridSearchCV
                         # and type(model.estimator) == KNeighborsClassifier
-                        and type(model.estimator) in [KNeighborsClassifier, IBLR_M, IBLR_PL]
+                        and type(model.estimator)
+                        in [KNeighborsClassifier, IBLR_M, IBLR_PL]
                         # or type(model) in [IBLR_M, IBLR_PL]
                         # and not self.dataset.train_together
                     ):
                         (
                             processed_y_test,
                             processed_pred_rank,
-                        ) = further_action_before_logging(model, test_dists, y_yield_test)
+                        ) = further_action_before_logging(
+                            model, test_dists, y_yield_test
+                        )
                     else:
                         (
                             processed_y_test,
@@ -441,14 +449,7 @@ class BaselineEvaluator(Evaluator):
         Records of model performances, measured by rr, mrr, regret and kendall tau, over each test compound.
     """
 
-    def __init__(
-        self,
-        dataset, 
-        n_rxns, 
-        outer_cv,
-        n_rxns_to_erase=0, 
-        n_evaluations=1
-    ):
+    def __init__(self, dataset, n_rxns, outer_cv, n_rxns_to_erase=0, n_evaluations=1):
         super().__init__(dataset, n_rxns, outer_cv, n_rxns_to_erase, n_evaluations)
         self.list_of_algorithms = ["Baseline"]
         self.list_of_names = ["Baseline"]
@@ -525,8 +526,8 @@ class MulticlassEvaluator(Evaluator):
         n_rxns,
         list_of_names,
         outer_cv,
-        n_rxns_to_erase=0, 
-        n_evaluations=1
+        n_rxns_to_erase=0,
+        n_evaluations=1,
     ):
         super().__init__(dataset, n_rxns, outer_cv, n_rxns_to_erase, n_evaluations)
         self.feature_type = feature_type
@@ -726,11 +727,19 @@ class MultilabelEvaluator(MulticlassEvaluator):
         n_rxns,
         list_of_names,
         outer_cv,
-        n_rxns_to_erase=0, 
-        n_evaluations=1
+        n_rxns_to_erase=0,
+        n_evaluations=1,
     ):
-        super().__init__(dataset, feature_type, n_rxns, list_of_names, outer_cv, n_rxns_to_erase, n_evaluations)
-        
+        super().__init__(
+            dataset,
+            feature_type,
+            n_rxns,
+            list_of_names,
+            outer_cv,
+            n_rxns_to_erase,
+            n_evaluations,
+        )
+
         self.list_of_algorithms = []
         for name in self.list_of_names:
             if name == "RFC":
@@ -882,8 +891,8 @@ class LabelRankingEvaluator(Evaluator):
         list_of_names,
         list_of_algorithms,
         outer_cv,
-        n_rxns_to_erase=0, 
-        n_evaluations=1
+        n_rxns_to_erase=0,
+        n_evaluations=1,
     ):
         super().__init__(dataset, n_rxns, outer_cv, n_rxns_to_erase, n_evaluations)
         self.feature_type = feature_type
@@ -1060,10 +1069,12 @@ class RegressorEvaluator(Evaluator):
         list_of_algorithms,
         list_of_names,
         outer_cv,
-        n_rxns_to_erase=0, 
-        n_evaluations=1
+        n_rxns_to_erase=0,
+        n_evaluations=1,
     ):
-        super().__init__(regressor_dataset, n_rxns, outer_cv,n_rxns_to_erase, n_evaluations)
+        super().__init__(
+            regressor_dataset, n_rxns, outer_cv, n_rxns_to_erase, n_evaluations
+        )
         self.feature_type = feature_type
         self.list_of_algorithms = list_of_algorithms
         self.list_of_names = list_of_names
@@ -1131,7 +1142,7 @@ class RegressorEvaluator(Evaluator):
                             )
                         )
                     )
-            else :
+            else:
                 y_test_reshape = y_test.flatten()
                 pred_rank_reshape = yield_to_ranking(model.predict(X_test).flatten())
         elif type(self.dataset) == dataloader.NatureDataset:
@@ -1157,15 +1168,15 @@ class RegressorEvaluator(Evaluator):
                 self._CV_loops(
                     perf_dict,
                     cv,
-                    X, #X_array,
+                    X,  # X_array,
                     array,
                     self._processing_before_logging,
-                    y_yield=array, #yield_array
+                    y_yield=array,  # yield_array
                 )
                 self.perf_dict.append(perf_dict)
-        # cases when both reaction components are ranked simultaneously 
+        # cases when both reaction components are ranked simultaneously
         # or one component is ranked but training together
-        else:  
+        else:
             perf_dict = PERFORMANCE_DICT
             self._CV_loops(
                 perf_dict,
