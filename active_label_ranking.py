@@ -245,7 +245,7 @@ def get_y_acquired(y_ranking, rem_inds, next_subs_inds, next_cond_inds):
 def iteration_of_lowest_diff(
     X, y_ranking, rem_inds, predicted_proba_array, n_subs_to_sample, n_conds_to_sample
 ):
-    """Samples reactions that have lowest difference between the top-k entries.
+    """Samples reactions that have lowest difference in predicted probability between the top-k entries.
 
     Parameters
     ----------
@@ -451,9 +451,19 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
         "Evaluation Iteration": [],
         "Initialization Iteration": [],
     }
-    for n_iter in tqdm(range(parser.n_evals)):  # Train test splits
+    # Splitting the train-test split so that the random selections don't get affected
+    train_inds_list = []
+    test_inds_list = []
+    for n_iter in range(parser.n_evals):  # Train test splits
         train_inds, test_inds = get_train_test_inds(y_ranking, parser.n_test_subs)
+        train_inds_list.append(train_inds)
+        test_inds_list.append(test_inds)
+
+    for n_iter in tqdm(range(parser.n_evals)):  # Train test splits
+        train_inds = train_inds_list[n_iter]
+        test_inds = test_inds_list[n_iter]
         train_smiles = [x for i, x in enumerate(smiles_list) if i in train_inds]
+
         if parser.strategy != "full_rfr":
             X_test = X[test_inds]
             y_test = y_ranking[test_inds]
@@ -483,14 +493,22 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                 n_init = parser.n_evals
 
         if parser.strategy not in ["full_rpc", "full_rfr"]:
-            for n in range(n_init):  # Initializations
+            initial_inds_list = []
+            rem_inds_list = []
+            # To separate the random process from random selection in the loop below
+            for n in range(n_init) :
                 initial_inds, rem_inds = initial_substrate_selection(
                     parser.initialization,
                     train_inds,
                     parser.n_initial_subs,
                     smiles_list=train_smiles,
                 )
-                # print("INTIAL INDS", len(initial_inds), "REMAINING INDS", len(rem_inds))
+                initial_inds_list.append(initial_inds)
+                rem_inds_list.append(rem_inds)
+            for n in range(n_init):  # Initializations
+                initial_inds = initial_inds_list[n]
+                rem_inds = rem_inds_list[n]
+                copied_rem_inds = deepcopy(rem_inds)
                 X_sampled = X[initial_inds]
                 y_sampled = y_ranking[initial_inds]
 
@@ -545,17 +563,17 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                             parser.n_subs_to_sample,
                             parser.n_conds_to_sample,
                         )
-
                     X_sampled = np.vstack((X_sampled, X_acquired))
                     y_sampled = np.vstack((y_sampled, y_ranking_acquired))
                     rem_inds = [
                         x for i, x in enumerate(rem_inds) if i not in next_subs_inds
                     ]
-                    # print("ALL REMAINING INDS", rem_inds, len(rem_inds))
-                    # print()
                     rpc.fit(X_sampled, y_sampled)
                     y_pred = rpc.predict(X_test)
                     rem_proba_array = rpc.predict_proba(X[rem_inds])
+                if n_init > 1 and parser.n_evals == 1 :
+                    rem_inds = deepcopy(copied_rem_inds)
+
         elif parser.strategy == "full_rpc":
             X_train = X[train_inds]
             y_train = y_ranking[train_inds]
