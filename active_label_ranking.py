@@ -357,25 +357,35 @@ def iteration_of_cond_first(
 
     next_subs_inds = []
     mfpgen = rdFingerprintGenerator.GetMorganGenerator(fpSize=1024, radius=3)
-    while len(next_subs_inds) < n_subs_to_sample:
-        sampled_fp = [
-            mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in sampled_smiles
-        ]
-        rem_fp = [mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in rem_smiles]
-        dists = np.zeros((len(rem_fp), len(sampled_fp)))
-        for i, fp in enumerate(rem_fp):
-            dists[i] = 1 - np.array(DataStructs.BulkTanimotoSimilarity(fp, sampled_fp))
-        sorted_inds = np.argsort(np.mean(dists, axis=1))[::-1]
-        if len(next_subs_inds) > 0:
-            for ind in sorted_inds:
-                if ind not in next_subs_inds:
-                    farthest_ind = ind
-                    break
-        else:
-            farthest_ind = sorted_inds[0]
-        next_subs_inds.append(farthest_ind)
-        sampled_fp.append(rem_fp[farthest_ind])
-
+    # while len(next_subs_inds) < n_subs_to_sample:
+    #     sampled_fp = [
+    #         mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in sampled_smiles
+    #     ]
+    #     rem_fp = [mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in rem_smiles]
+    #     dists = np.zeros((len(rem_fp), len(sampled_fp)))
+    #     for i, fp in enumerate(rem_fp):
+    #         dists[i] = 1 - np.array(DataStructs.BulkTanimotoSimilarity(fp, sampled_fp))
+    #     sorted_inds = np.argsort(np.mean(dists, axis=1))[::-1]
+    #     if len(next_subs_inds) > 0:
+    #         for ind in sorted_inds:
+    #             if ind not in next_subs_inds:
+    #                 farthest_ind = ind
+    #                 break
+    #     else:
+    #         farthest_ind = sorted_inds[0]
+    #     next_subs_inds.append(farthest_ind)
+    #     sampled_fp.append(rem_fp[farthest_ind])
+    # Rather than getting the farthest, get ones that divide the range of distances.
+    sampled_fp = [
+        mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in sampled_smiles
+    ]
+    rem_fp = [mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in rem_smiles]
+    dists = np.zeros((len(rem_fp), len(sampled_fp)))
+    for i, fp in enumerate(rem_fp):
+        dists[i] = 1 - np.array(DataStructs.BulkTanimotoSimilarity(fp, sampled_fp))
+    sorted_inds = np.argsort(np.mean(dists, axis=1))[::-1]
+    next_subs_inds = [sorted_inds[int(len(sorted_inds)*(x/(n_subs_to_sample+2)))] for x in range(2, n_subs_to_sample+2)]
+    print(next_subs_inds)
     X_acquired = X[[rem_inds[x] for x in next_subs_inds]]
     y_ranking_acquired = get_y_acquired(
         y_ranking, rem_inds, next_subs_inds, next_cond_inds
@@ -447,7 +457,8 @@ def iteration_of_two_cond_pairs(X,
     dists = np.zeros((len(rem_fp), len(sampled_fp)))
     for i, fp in enumerate(rem_fp):
         dists[i] = 1 - np.array(DataStructs.BulkTanimotoSimilarity(fp, sampled_fp))
-    first_subs_ind = np.argmax(np.mean(dists, axis=1))
+    # first_subs_ind = np.argmax(np.mean(dists, axis=1))
+    first_subs_ind = np.argsort(np.mean(dists, axis=1))[int(len(dists)*(2/3))]
     
     other_cond_pair = [x for x in range(y_ranking.shape[1]) if x not in first_cond_pair]
     # Getting substrate with highest uncertainty for the pair above
