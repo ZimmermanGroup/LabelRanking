@@ -27,7 +27,7 @@ def parse_args():
     )
     parser.add_argument(
         "--strategy",
-        choices=["condition_first", "lowest_diff", "random", "full_rfr", "full_rpc"],
+        choices=["condition_first", "lowest_diff", "two_condition_pairs", "random", "full_rfr", "full_rpc"],
         help="Which AL acquisition strategy to use.",
     )
     parser.add_argument(
@@ -132,13 +132,14 @@ def get_train_test_inds(y_ranking, n_test_cases):
     """
     test_inds = []
     for i in range(n_test_cases):
-        test_inds.extend(
-            list(
-                np.random.choice(
-                    np.where(y_ranking[:, i] == 1)[0], n_test_cases, replace=False
+        if len(np.where(y_ranking[:, i] == 1)[0]) > n_test_cases :
+            test_inds.extend(
+                list(
+                    np.random.choice(
+                        np.where(y_ranking[:, i] == 1)[0], n_test_cases, replace=False
+                    )
                 )
             )
-        )
     train_inds = [x for x in range(y_ranking.shape[0]) if x not in test_inds]
     return train_inds, test_inds
 
@@ -348,7 +349,7 @@ def iteration_of_cond_first(
         np.argsort(avg_deviation, axis=None),
         (predicted_proba_array.shape[1], predicted_proba_array.shape[2]),
     )
-    conds = [inds[0][0], inds[0][1]]
+    conds = [inds[0][0], inds[1][0]]
     while len(conds) < n_conds_to_sample:
         rem_conds = [x for x in range(avg_deviation.shape[1]) if x not in conds]
         conds.append(np.argmin(np.mean(avg_deviation[rem_conds, conds], axis=1)))
@@ -381,6 +382,88 @@ def iteration_of_cond_first(
     )
     return X_acquired, y_ranking_acquired, next_subs_inds
 
+def iteration_of_two_cond_pairs(X,
+    y_ranking,
+    train_inds,
+    rem_inds,
+    predicted_proba_array,
+    n_subs_to_sample,
+    n_conds_to_sample,
+    smiles_list,
+):
+    """First gets a pair of reactions where the average of predicted probability's deviation from 0.5
+     is smallest, across all candidates. Select a substrate with the lowest average Tanimoto similarity to those sampled.
+    For the other pair of conditions, select substrate that has highest uncertainty.
+
+    Parameters
+    ----------
+    X : np.ndarray of shape (n_substrates, n_features)
+        Full input array.
+    y_ranking : np.ndarray of shape (n_substrates, n_rxn_conditions)
+        Ranking array of all substrates.
+    train_inds : list of ints
+        Indices selected for the training set candidates.
+    rem_inds : list of ints
+        Indices that are still available for sampling.
+    predicted_proba_array : np.ndarray of shape (n_substrates, n_conditions, n_conditions)
+        Element at row i, column j corresponds to the RPC's predicted score of condition i being
+        favorable over condition j.
+    n_subs_to_sample : int
+        Number of substrates to sample.
+    n_conds_to_sample : int
+        Number of reaction conditions to sample for one substrate.
+    smiles_list : list of str
+        List of smiles strings in the TRAINING dataset.
+
+    Returns
+    -------
+    X_acquired : np.ndarray of shape (n_subs_to_sample, n_features)
+        Input array of the substrates that were subject to data collection.
+    y_ranking_acquired : np.ndarray of shape (n_subs_to_sample, n_conds)
+        Ranking array of what the experimentalist would see.
+        Unsampled reaction conditions have np.nan
+    next_subs_inds : np.ndarray of shape (n_subs_to_sample,)
+        Indices from REM_INDS that have been sampled in this iteration.
+    """
+    sampled_smiles = []
+    rem_smiles = []
+    for i, smiles in enumerate(smiles_list):
+        if train_inds[i] in rem_inds:
+            rem_smiles.append(smiles)
+        else:
+            sampled_smiles.append(smiles)
+    avg_deviation = np.mean(np.abs(predicted_proba_array - 0.5), axis=0)
+    inds = np.unravel_index(
+        np.argsort(avg_deviation, axis=None),
+        (predicted_proba_array.shape[1], predicted_proba_array.shape[2]),
+    )
+    first_cond_pair = [inds[0][0], inds[1][0]]
+    # Getting substrate with highest average distance to sampled compounds
+    mfpgen = rdFingerprintGenerator.GetMorganGenerator(fpSize=1024, radius=3)
+    sampled_fp = [
+        mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in sampled_smiles
+    ]
+    rem_fp = [mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in rem_smiles]
+    dists = np.zeros((len(rem_fp), len(sampled_fp)))
+    for i, fp in enumerate(rem_fp):
+        dists[i] = 1 - np.array(DataStructs.BulkTanimotoSimilarity(fp, sampled_fp))
+    first_subs_ind = np.argmax(np.mean(dists, axis=1))
+    
+    other_cond_pair = [x for x in range(y_ranking.shape[1]) if x not in first_cond_pair]
+    # Getting substrate with highest uncertainty for the pair above
+    other_subs = np.argsort(np.abs(predicted_proba_array[:, other_cond_pair[0], other_cond_pair[1]] - 0.5))[::-1]
+    if other_subs[0] != first_subs_ind :
+        other_subs_ind = other_subs[0]
+    else :
+        other_subs_ind = other_subs[1]
+    next_subs_inds = [first_subs_ind] + [other_subs_ind]
+    next_cond_inds = np.array([[x for x in first_cond_pair], [x for x in other_cond_pair]])
+
+    X_acquired = X[[rem_inds[x] for x in next_subs_inds]]
+    y_ranking_acquired = get_y_acquired(
+        y_ranking, rem_inds, next_subs_inds, next_cond_inds
+    )
+    return X_acquired, y_ranking_acquired, next_subs_inds
 
 def iteration_of_random(X, y_ranking, rem_inds, n_subs_to_sample, n_conds_to_sample):
     """Selects substrates and reaction conditions randomly, for baseline purposes.
@@ -542,6 +625,21 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                             y_ranking_acquired,
                             next_subs_inds,
                         ) = iteration_of_cond_first(
+                            X,
+                            y_ranking,
+                            train_inds,
+                            rem_inds,
+                            rem_proba_array,
+                            parser.n_subs_to_sample,
+                            parser.n_conds_to_sample,
+                            train_smiles,
+                        )
+                    elif parser.strategy == "two_condition_pairs":
+                        (
+                            X_acquired,
+                            y_ranking_acquired,
+                            next_subs_inds,
+                        ) = iteration_of_two_cond_pairs(
                             X,
                             y_ranking,
                             train_inds,
