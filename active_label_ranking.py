@@ -36,6 +36,11 @@ def parse_args():
         help="How to select the 6 initial substrate pairs.",
     )
     parser.add_argument(
+        "--substrate_selection",
+        choices=["farthest","quantile","skip_one"],
+        help="How to select the substrates for the condition-first and two-condition-pair strategies."
+    )
+    parser.add_argument(
         "--n_initial_subs",
         default=6,
         type=int,
@@ -301,6 +306,7 @@ def iteration_of_cond_first(
     n_subs_to_sample,
     n_conds_to_sample,
     smiles_list,
+    substrate_selection,
 ):
     """First gets a pair of reactions where the average of predicted probability's deviation from 0.5
      is smallest, across all candidates.
@@ -325,6 +331,8 @@ def iteration_of_cond_first(
         Number of reaction conditions to sample for one substrate.
     smiles_list : list of str
         List of smiles strings in the TRAINING dataset.
+    substrate_selection : str {'farthest', 'quantile', 'skip_one'}
+        How to select substrates.
 
     Returns
     -------
@@ -355,37 +363,40 @@ def iteration_of_cond_first(
         conds.append(np.argmin(np.mean(avg_deviation[rem_conds, conds], axis=1)))
     next_cond_inds = np.repeat(np.array(conds).reshape(1, -1), n_subs_to_sample, axis=0)
 
-    next_subs_inds = []
     mfpgen = rdFingerprintGenerator.GetMorganGenerator(fpSize=1024, radius=3)
-    # while len(next_subs_inds) < n_subs_to_sample:
-    #     sampled_fp = [
-    #         mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in sampled_smiles
-    #     ]
-    #     rem_fp = [mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in rem_smiles]
-    #     dists = np.zeros((len(rem_fp), len(sampled_fp)))
-    #     for i, fp in enumerate(rem_fp):
-    #         dists[i] = 1 - np.array(DataStructs.BulkTanimotoSimilarity(fp, sampled_fp))
-    #     sorted_inds = np.argsort(np.mean(dists, axis=1))[::-1]
-    #     if len(next_subs_inds) > 0:
-    #         for ind in sorted_inds:
-    #             if ind not in next_subs_inds:
-    #                 farthest_ind = ind
-    #                 break
-    #     else:
-    #         farthest_ind = sorted_inds[0]
-    #     next_subs_inds.append(farthest_ind)
-    #     sampled_fp.append(rem_fp[farthest_ind])
-    # Rather than getting the farthest, get ones that divide the range of distances.
-    sampled_fp = [
-        mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in sampled_smiles
-    ]
-    rem_fp = [mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in rem_smiles]
-    dists = np.zeros((len(rem_fp), len(sampled_fp)))
-    for i, fp in enumerate(rem_fp):
-        dists[i] = 1 - np.array(DataStructs.BulkTanimotoSimilarity(fp, sampled_fp))
-    sorted_inds = np.argsort(np.mean(dists, axis=1))[::-1]
-    next_subs_inds = [sorted_inds[int(len(sorted_inds)*(x/(n_subs_to_sample+2)))] for x in range(2, n_subs_to_sample+2)]
-    print(next_subs_inds)
+    if substrate_selection == "farthest":
+        next_subs_inds = []
+        while len(next_subs_inds) < n_subs_to_sample:
+            sampled_fp = [
+                mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in sampled_smiles
+            ]
+            rem_fp = [mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in rem_smiles]
+            dists = np.zeros((len(rem_fp), len(sampled_fp)))
+            for i, fp in enumerate(rem_fp):
+                dists[i] = 1 - np.array(DataStructs.BulkTanimotoSimilarity(fp, sampled_fp))
+            sorted_inds = np.argsort(np.mean(dists, axis=1))[::-1]
+            if len(next_subs_inds) > 0:
+                for ind in sorted_inds:
+                    if ind not in next_subs_inds:
+                        farthest_ind = ind
+                        break
+            else:
+                farthest_ind = sorted_inds[0]
+            next_subs_inds.append(farthest_ind)
+            sampled_fp.append(rem_fp[farthest_ind])
+    else :
+        # Rather than getting the farthest, get ones that divide the range of distances.
+        sampled_fp = [
+            mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in sampled_smiles
+        ]
+        rem_fp = [mfpgen.GetCountFingerprint(Chem.MolFromSmiles(x)) for x in rem_smiles]
+        dists = np.zeros((len(rem_fp), len(sampled_fp)))
+        for i, fp in enumerate(rem_fp):
+            dists[i] = 1 - np.array(DataStructs.BulkTanimotoSimilarity(fp, sampled_fp))
+        sorted_inds = np.argsort(np.mean(dists, axis=1))[::-1]
+        if substrate_selection == "quantile" : n_to_add = 1
+        elif substrate_selection == "skip_one" : n_to_add = 2
+        next_subs_inds = [sorted_inds[int(len(sorted_inds)*(x/(n_subs_to_sample+n_to_add)))] for x in range(n_to_add, n_subs_to_sample+n_to_add)]
     X_acquired = X[[rem_inds[x] for x in next_subs_inds]]
     y_ranking_acquired = get_y_acquired(
         y_ranking, rem_inds, next_subs_inds, next_cond_inds
@@ -400,6 +411,7 @@ def iteration_of_two_cond_pairs(X,
     n_subs_to_sample,
     n_conds_to_sample,
     smiles_list,
+    substrate_selection,
 ):
     """First gets a pair of reactions where the average of predicted probability's deviation from 0.5
      is smallest, across all candidates. Select a substrate with the lowest average Tanimoto similarity to those sampled.
@@ -424,6 +436,8 @@ def iteration_of_two_cond_pairs(X,
         Number of reaction conditions to sample for one substrate.
     smiles_list : list of str
         List of smiles strings in the TRAINING dataset.
+    substrate_selection : str {'farthest', 'quantile', 'skip_one'}
+        How to select substrates.
 
     Returns
     -------
@@ -457,12 +471,18 @@ def iteration_of_two_cond_pairs(X,
     dists = np.zeros((len(rem_fp), len(sampled_fp)))
     for i, fp in enumerate(rem_fp):
         dists[i] = 1 - np.array(DataStructs.BulkTanimotoSimilarity(fp, sampled_fp))
-    # first_subs_ind = np.argmax(np.mean(dists, axis=1))
-    first_subs_ind = np.argsort(np.mean(dists, axis=1))[int(len(dists)*(2/3))]
+    if substrate_selection == "farthest":
+        first_subs_ind = np.argmax(np.mean(dists, axis=1))
+    else :
+        if substrate_selection == "quantile" : portion = 1/2
+        elif substrate_selection == "skip_one" : portion = 2/3
+        first_subs_ind = np.argsort(np.mean(dists, axis=1))[int(len(dists)*portion)]
     
     other_cond_pair = [x for x in range(y_ranking.shape[1]) if x not in first_cond_pair]
     # Getting substrate with highest uncertainty for the pair above
-    other_subs = np.argsort(np.abs(predicted_proba_array[:, other_cond_pair[0], other_cond_pair[1]] - 0.5))[::-1]
+    other_subs = np.argsort(
+        np.abs(predicted_proba_array[:, other_cond_pair[0], other_cond_pair[1]] - 0.5)
+    )[::-1]
     if other_subs[0] != first_subs_ind :
         other_subs_ind = other_subs[0]
     else :
@@ -644,6 +664,7 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                             parser.n_subs_to_sample,
                             parser.n_conds_to_sample,
                             train_smiles,
+                            parser.substrate_selection
                         )
                     elif parser.strategy == "two_condition_pairs":
                         (
@@ -659,6 +680,7 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                             parser.n_subs_to_sample,
                             parser.n_conds_to_sample,
                             train_smiles,
+                            parser.substrate_selection
                         )
                     elif parser.strategy == "random":
                         (
@@ -755,16 +777,19 @@ def main(parser):
 
     if parser.save:
         filename = f"performance_excels/AL/{parser.dataset}_{parser.n_initial_subs}_{parser.n_conds_to_sample}_{parser.n_subs_to_sample}_{parser.n_test_subs}.xlsx"
+        if parser.substrate_selection == None:
+            sheetname = f"{parser.strategy}_{parser.initialization}"
+        else :
+            sheetname = f"{parser.strategy}_{parser.substrate_selection[:5]}_{parser.initialization}"
         if os.path.exists(filename):
             with pd.ExcelWriter(filename, mode="a") as writer:
                 perf_df.to_excel(
-                    writer, sheet_name=f"{parser.strategy}_{parser.initialization}"
+                    writer, sheet_name=sheetname
                 )
         else:
             perf_df.to_excel(
-                filename, sheet_name=f"{parser.strategy}_{parser.initialization}"
+                filename, sheet_name=sheetname
             )
-
 
 if __name__ == "__main__":
     parser = parse_args()

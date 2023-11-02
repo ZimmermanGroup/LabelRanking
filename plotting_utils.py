@@ -224,6 +224,77 @@ def trellis_of_algs(sub_df_dict, list_of_algs, metric1, metric2, filename=None):
     plt.show()
 
 
+### For Active learning analysis
+def AL_trellis(df_to_plot, rpc_df, rfr_df, ymin, ymax):
+    """ Draws a trellis of AL performances of the first 25 trials."""
+    fig, ax = plt.subplots(nrows=5, ncols=5, sharex=True, sharey=True, figsize=(15,15)) #12,12
+    for i in range(25):
+        row = i // 5
+        col = i % 5
+        sns.lineplot(
+            df_to_plot[df_to_plot["Evaluation Iteration"]==i], 
+            x="Substrates Sampled", 
+            y="Reciprocal Rank", 
+            hue="Strategy", 
+            style="Strategy", 
+            markers=True, 
+            ax=ax[row,col], 
+            palette="viridis", 
+            alpha=0.7
+        )
+        ax[row, col].plot(np.arange(6,38,2), [rpc_df[rpc_df["Evaluation Iteration"]==i]["Reciprocal Rank"]]*16, color="orange", alpha=0.5, ls="--")
+        ax[row, col].plot(np.arange(6,38,2), [rfr_df[rfr_df["Evaluation Iteration"]==i]["Reciprocal Rank"]]*16, color="grey", alpha=0.5, ls="--")
+        if row == 0 and col == 4 :
+            ax[row, col].legend(bbox_to_anchor=(1.01,0.99))
+        else :
+            ax[row, col].get_legend().remove()
+        ax[row, col].set_ylim(ymin, ymax)
+        ax[row, col].set_yticks([round(0.1*x, 1) for x in range(int(10*ymin),int(10*ymax)+1) ])
+        if row == 4 and col == 2 :
+            ax[row, col].set_xlabel("Number of Sampled Substrates", fontsize=12)    
+        else :
+            ax[row, col].set_xlabel("")
+        if row == 2 and col == 0 :
+            ax[row, col].set_ylabel("Mean Reciprocal Rank", fontsize=12)
+        else :
+            ax[row, col].set_ylabel("")
+        if col == 0 :
+            ax[row, col].set_yticks([round(0.1*x, 1) for x in range(int(10*ymin),int(10*ymax)+1) ])
+        
+        for axis in ['top', 'bottom', 'left', 'right']:
+            ax[row, col].spines[axis].set_linewidth(2)
+    plt.show()
+
+def AL_average(df_to_plot, rpc_df, rfr_df, xmin, xmax):
+    fig, ax = plt.subplots()
+    sns.lineplot(
+        df_to_plot, 
+        x="Substrates Sampled", 
+        y="Reciprocal Rank", hue="Strategy", 
+        style="Strategy", 
+        markers=True, 
+        palette="viridis"
+    )
+    ax.plot(
+        np.arange(xmin,xmax+1), 
+        [rpc_df["Reciprocal Rank"].mean()]*(xmax+1-xmin), 
+        color="orange", 
+        alpha=0.7, 
+        ls="--"
+    )
+    ax.plot(
+        np.arange(xmin,xmax+1), 
+        [rfr_df["Reciprocal Rank"].mean()]*(xmax+1-xmin), 
+        color="grey", 
+        alpha=0.7, 
+        ls="--"
+    )
+    for axis in ['top', 'bottom', 'left', 'right']:
+        ax.spines[axis].set_linewidth(2)
+    ax.set_xlim(xmin, xmax)
+    ax.legend(bbox_to_anchor=(1.01,0.99))
+    plt.show()
+
 ### Borrowed from scikit_posthocs._plotting.py due to unknown error
 from typing import Union, List, Tuple, Dict, Set
 
