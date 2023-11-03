@@ -8,7 +8,7 @@ import pandas as pd
 from rdkit import Chem
 from rdkit.ML.Cluster import Butina
 from scipy.stats.mstats import rankdata
-from sklearn.model_selection import GridSearchCV, PredefinedSplit
+from sklearn.model_selection import GridSearchCV, PredefinedSplit, train_test_split
 from sklearn.ensemble import RandomForestRegressor
 import os
 from tqdm import tqdm
@@ -22,7 +22,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Specify the evaluation to run.")
     parser.add_argument(
         "--dataset",
-        choices=["amine", "amide", "sulfonamide"],
+        choices=["amine", "fragment", "whole_amine", "whole_bromide"],
         help="Which of the natureHTE dataset to use.",
     )
     parser.add_argument(
@@ -569,11 +569,22 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
     train_inds_list = []
     test_inds_list = []
     for n_iter in range(parser.n_evals):  # Train test splits
-        train_inds, test_inds = get_train_test_inds(y_ranking, parser.n_test_subs)
-        train_inds_list.append(train_inds)
-        test_inds_list.append(test_inds)
-
-    for n_iter in tqdm(range(parser.n_evals)):  # Train test splits
+        if parser.dataset == "amine":
+            train_inds, test_inds = get_train_test_inds(y_ranking, parser.n_test_subs)
+            train_inds_list.append(train_inds)
+            test_inds_list.append(test_inds)
+            n_evals = parser.n_evals
+        else : #  conduct 
+            top_class = np.where(y_ranking == 1)[1]
+            inds = np.arange(len(top_class))
+            train_inds, test_inds = train_test_split(inds, test_size=0.5, random_state=42+n_iter, stratify=top_class)
+            train_inds_list.append(train_inds)
+            test_inds_list.append(test_inds)
+            train_inds_list.append(test_inds)
+            test_inds_list.append(train_inds)
+            n_evals = 2 * parser.n_evals
+    
+    for n_iter in tqdm(range(n_evals)):  # Train test splits
         train_inds = train_inds_list[n_iter]
         test_inds = test_inds_list[n_iter]
         train_smiles = [x for i, x in enumerate(smiles_list) if i in train_inds]
@@ -604,7 +615,10 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
             if parser.strategy != "random":
                 n_init = 1
             else:
-                n_init = parser.n_evals
+                if parser.dataset == "amine" :
+                    n_init = parser.n_evals
+                else :
+                    n_init = 2
 
         if parser.strategy not in ["full_rpc", "full_rfr"]:
             initial_inds_list = []
@@ -759,15 +773,21 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
 
 def main(parser):
     # array preparation
-    dataset = NatureDataset(False, parser.dataset, 1)
+    if parser.dataset == "amine"  :
+        dataset = NatureDataset(False, parser.dataset, 1)
+        smiles_list = [
+            x for i, x in enumerate(dataset.smiles_list) if i not in dataset.validation_rows
+        ]
+    else:
+        dataset = ScienceDataset(False, parser.dataset, 1)
+        smiles_list = dataset.smiles_list
+
     if parser.strategy == "full_rfr":
+        # Please note that we do not consider training a regressor for any of the Science datasets.
         regressor_dataset = NatureDataset(True, parser.dataset, 1)
         X = regressor_dataset.X_fp
     else:
         X = dataset.X_fp
-    smiles_list = [
-        x for i, x in enumerate(dataset.smiles_list) if i not in dataset.validation_rows
-    ]
     # both y arrays are of shape (n_substrates, n_conditions)
     y_ranking = dataset.y_ranking
     y_yield = dataset.y_yield
@@ -777,10 +797,14 @@ def main(parser):
 
     if parser.save:
         filename = f"performance_excels/AL/{parser.dataset}_{parser.n_initial_subs}_{parser.n_conds_to_sample}_{parser.n_subs_to_sample}_{parser.n_test_subs}.xlsx"
-        if parser.substrate_selection == None:
+        if parser.substrate_selection == None or parser.strategy == "random":
             sheetname = f"{parser.strategy}_{parser.initialization}"
         else :
-            sheetname = f"{parser.strategy}_{parser.substrate_selection[:5]}_{parser.initialization}"
+            if parser.strategy == "two_condition_pairs":
+                strategyname = "two_condition"
+            else :
+                strategyname = parser.strategy
+            sheetname = f"{strategyname}_{parser.substrate_selection[:5]}_{parser.initialization}"
         if os.path.exists(filename):
             with pd.ExcelWriter(filename, mode="a") as writer:
                 perf_df.to_excel(

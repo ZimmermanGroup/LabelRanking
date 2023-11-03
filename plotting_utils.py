@@ -243,7 +243,8 @@ def AL_trellis(df_to_plot, rpc_df, rfr_df, ymin, ymax):
             alpha=0.7
         )
         ax[row, col].plot(np.arange(6,38,2), [rpc_df[rpc_df["Evaluation Iteration"]==i]["Reciprocal Rank"]]*16, color="orange", alpha=0.5, ls="--")
-        ax[row, col].plot(np.arange(6,38,2), [rfr_df[rfr_df["Evaluation Iteration"]==i]["Reciprocal Rank"]]*16, color="grey", alpha=0.5, ls="--")
+        if rfr_df is not None :
+            ax[row, col].plot(np.arange(6,38,2), [rfr_df[rfr_df["Evaluation Iteration"]==i]["Reciprocal Rank"]]*16, color="grey", alpha=0.5, ls="--")
         if row == 0 and col == 4 :
             ax[row, col].legend(bbox_to_anchor=(1.01,0.99))
         else :
@@ -282,13 +283,14 @@ def AL_average(df_to_plot, rpc_df, rfr_df, xmin, xmax):
         alpha=0.7, 
         ls="--"
     )
-    ax.plot(
-        np.arange(xmin,xmax+1), 
-        [rfr_df["Reciprocal Rank"].mean()]*(xmax+1-xmin), 
-        color="grey", 
-        alpha=0.7, 
-        ls="--"
-    )
+    if rfr_df is not None :
+        ax.plot(
+            np.arange(xmin,xmax+1), 
+            [rfr_df["Reciprocal Rank"].mean()]*(xmax+1-xmin), 
+            color="grey", 
+            alpha=0.7, 
+            ls="--"
+        )
     for axis in ['top', 'bottom', 'left', 'right']:
         ax.spines[axis].set_linewidth(2)
     ax.set_xlim(xmin, xmax)

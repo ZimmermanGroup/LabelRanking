@@ -965,3 +965,95 @@ class DeoxyDataset(Dataset):
             else:
                 self._y_label = np.argmin(self._y_yield, axis=1)
         return self._y_label
+
+
+class ScienceDataset(Dataset):
+    """
+    Prepares arrays from the Science MALDI dataset for downstream use.
+
+    Parameters
+    ----------
+    for_regressor : bool
+        Whether the input will be used for training a regressor.
+    component_to_rank : str {'fragment', 'whole_bromide', 'whole_amine'}
+        Which reaction component to be ranked.
+    train_together : bool
+        Whether the non-label reaction component should be trained altogether, or used as separate datasets.
+        Only considered when component_to_rank is not 'both'.
+    n_rxns : int
+        Number of reactions that we simulate to conduct.
+
+    Attributes
+    ----------
+    X_fp : np.2darray of shape (n_samples, n_bits)
+    """
+
+    def __init__(self, for_regressor, component_to_rank, n_rxns):
+        self.for_regressor = for_regressor
+        self.component_to_rank = component_to_rank
+        self.n_rxns = n_rxns
+
+        if self.component_to_rank == "fragment":
+            self.df = pd.read_excel(
+                "datasets/science_dark/science_dark.xlsx",
+                usecols=["calc_Smiles", "Cu normalized MALDI response (MALDI prod/ MALDI IS)", "Ir normalized MALDI response (MALDI prod/ MALDI IS)", "Pd normalized MALDI response (MALDI prod/ MALDI IS)", "Ru normalized MALDI response (MALDI prod/ MALDI IS)"]
+            )
+        else :
+            self.df = pd.read_excel(
+                "datasets/science_dark/science_dark.xlsx",
+                sheet_name = "Tab S2. Whole molecule data",
+                usecols=["Canonical_Smiles", "Cu TWC Product Area%", "Ir TWC Product Area%", "Pd TWC Product Area", "Ru TWC Product Area%"]
+            )
+            if self.component_to_rank == "whole_bromide":
+                self.df = self.df.iloc[:192, :]
+            elif self.component_to_rank == "whole_amine" :
+                self.df = self.df.iloc[192:, :]
+        self.smiles_list = [
+            x for x in self.df.iloc[:,0].values if str(x) != "nan"
+        ]
+        self.nan_ind = [i for i, x in enumerate(self.df.iloc[:,0].to_numpy()) if type(x)!=str]
+        self.n_rank_component = 4
+
+    @property
+    def X_fp(self, fpSize=1024, radius=3):
+        """
+        Prepares fingerprint arrays of substrates.
+        Parameters
+        ----------
+        fpSize : int
+            Length of the Morgan FP.
+        radius : int
+            Radius of the Morgan FP.
+
+        Returns
+        -------
+        X_fp : np.ndarray of shape (n_rxns, n_features)
+            n_features depends on self.for_regressor
+        """
+        mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
+        self._X_fp = np.vstack(
+            tuple([
+                mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(str(x))) 
+                for x in self.smiles_list
+            ])
+        )
+        return self._X_fp
+    
+    @property
+    def y_yield(self):
+        """Prepares continuous yield value array.
+        Each column corresponds to Cu, Ir, Pd, Ru condition."""
+        if len(self.nan_ind) > 0 :
+            self._y_yield = np.delete(self.df.iloc[:, 1:].to_numpy(), self.nan_ind[0], 0)
+        else :
+            self._y_yield = self.df.iloc[:, 1:].to_numpy()
+        return self._y_yield
+    
+    @property
+    def y_ranking(self):
+        """Transforms raw continuous yield values into arrays of ranks."""
+        if len(self.nan_ind) > 0 :
+            self._y_ranking = np.delete(yield_to_ranking(self.df.iloc[:, 1:].to_numpy()), self.nan_ind[0], 0)
+        else :
+            self._y_ranking = yield_to_ranking(self.df.iloc[:, 1:].to_numpy())
+        return self._y_ranking
