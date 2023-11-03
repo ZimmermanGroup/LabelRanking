@@ -27,7 +27,7 @@ def parse_args():
     )
     parser.add_argument(
         "--strategy",
-        choices=["condition_first", "lowest_diff", "two_condition_pairs", "random", "full_rfr", "full_rpc"],
+        choices=["condition_first", "lowest_diff", "two_condition_pairs", "all_conditions", "random", "full_rfr", "full_rpc"],
         help="Which AL acquisition strategy to use.",
     )
     parser.add_argument(
@@ -351,7 +351,6 @@ def iteration_of_cond_first(
             rem_smiles.append(smiles)
         else:
             sampled_smiles.append(smiles)
-    # print("LEN SMILES", len(sampled_smiles), len(rem_smiles))
     avg_deviation = np.mean(np.abs(predicted_proba_array - 0.5), axis=0)
     inds = np.unravel_index(
         np.argsort(avg_deviation, axis=None),
@@ -360,7 +359,7 @@ def iteration_of_cond_first(
     conds = [inds[0][0], inds[1][0]]
     while len(conds) < n_conds_to_sample:
         rem_conds = [x for x in range(avg_deviation.shape[1]) if x not in conds]
-        conds.append(np.argmin(np.mean(avg_deviation[rem_conds, conds], axis=1)))
+        conds.append(np.argmin(np.mean(avg_deviation[rem_conds, :], axis=1)))
     next_cond_inds = np.repeat(np.array(conds).reshape(1, -1), n_subs_to_sample, axis=0)
 
     mfpgen = rdFingerprintGenerator.GetMorganGenerator(fpSize=1024, radius=3)
@@ -482,7 +481,7 @@ def iteration_of_two_cond_pairs(X,
     # Getting substrate with highest uncertainty for the pair above
     other_subs = np.argsort(
         np.abs(predicted_proba_array[:, other_cond_pair[0], other_cond_pair[1]] - 0.5)
-    )[::-1]
+    ) # [::-1]
     if other_subs[0] != first_subs_ind :
         other_subs_ind = other_subs[0]
     else :
@@ -536,6 +535,52 @@ def iteration_of_random(X, y_ranking, rem_inds, n_subs_to_sample, n_conds_to_sam
     y_ranking_acquired = get_y_acquired(
         y_ranking, rem_inds, next_subs_inds, next_cond_inds
     )
+    return X_acquired, y_ranking_acquired, next_subs_inds
+
+def iteration_of_all_cond(X, y_ranking, train_inds, rem_inds, predicted_proba_array, n_subs_to_sample, n_conds_to_sample, train_smiles, substrate_selection) :
+    """Selects a substrate that has either
+    the lowest range across the scores
+    the lowest average deviation of predicted probability values closest to 0.5
+
+    Parameters
+    ----------
+    X : np.ndarray of shape (n_substrates, n_features)
+        Full input array.
+    y_ranking : np.ndarray of shape (n_substrates, n_rxn_conditions)
+        Ranking array of all substrates.
+    train_inds : list of ints
+        Indices selected for the training set candidates.
+    rem_inds : list of ints
+        Indices that are still available for sampling.
+    predicted_proba_array : np.ndarray of shape (n_substrates, n_conditions, n_conditions)
+        Element at row i, column j corresponds to the RPC's predicted score of condition i being
+        favorable over condition j.
+    n_subs_to_sample : int
+        Number of substrates to sample.
+    n_conds_to_sample : int
+        Number of reaction conditions to sample for one substrate.
+    smiles_list : list of str
+        List of smiles strings in the TRAINING dataset.
+    substrate_selection : str {'farthest', 'quantile', 'skip_one'}
+        How to select substrates.
+
+    Returns
+    -------
+    X_acquired : np.ndarray of shape (n_subs_to_sample, n_features)
+        Input array of the substrates that were subject to data collection.
+    y_ranking_acquired : np.ndarray of shape (n_subs_to_sample, n_conds)
+        Ranking array of what the experimentalist would see.
+        Unsampled reaction conditions have np.nan
+    next_subs_inds : np.ndarray of shape (n_subs_to_sample,)
+        Indices from REM_INDS that have been sampled in this iteration.
+    """
+    score_array = np.sum(predicted_proba_array, axis=2)
+    next_subs_inds = np.argmin(np.ptp(score_array, axis=1))
+    if n_subs_to_sample == 1 :
+        next_subs_inds = [int(next_subs_inds)]
+        next_cond_inds = np.array([[1,2,3,4]])
+    X_acquired = X[next_subs_inds]
+    y_ranking_acquired = get_y_acquired(y_ranking, rem_inds, next_subs_inds, next_cond_inds)
     return X_acquired, y_ranking_acquired, next_subs_inds
 
 
@@ -651,6 +696,7 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                     update_perf_dict(
                         perf_dict, rr_score, kt_score, y_sampled.shape[0], n_iter, n
                     )
+                    ### Strategies for sampling only 2 reaction conditions
                     if parser.strategy == "lowest_diff":
                         (
                             X_acquired,
@@ -707,6 +753,23 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                             rem_inds,
                             parser.n_subs_to_sample,
                             parser.n_conds_to_sample,
+                        )
+                    ### Strategies for selecting all reaction conditions
+                    elif parser.n_conds_to_sample == y_ranking.shape[1]:
+                        (
+                            X_acquired,
+                            y_ranking_acquired,
+                            next_subs_inds,
+                        ) = iteration_of_all_cond(
+                            X,
+                            y_ranking,
+                            train_inds,
+                            rem_inds,
+                            rem_proba_array,
+                            parser.n_subs_to_sample,
+                            parser.n_conds_to_sample,
+                            train_smiles,
+                            parser.substrate_selection
                         )
                     X_sampled = np.vstack((X_sampled, X_acquired))
                     y_sampled = np.vstack((y_sampled, y_ranking_acquired))
