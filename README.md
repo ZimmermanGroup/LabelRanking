@@ -37,9 +37,9 @@ includes the raw datasets.
 * science_data_analysis.ipynb :
 Compares random forest regressors with RPC on the fragment data provided in [*Science*, **2018**, *361*, 1](https://www.science.org/doi/10.1126/science.aar6236).
 
-7. active_label_ranking.py
+7. active_query_strategies.py and active_label_ranking.py
 
-   Includes various query strategies and active learning implementation. 
+   Includes various query strategies and active learning implementation, respectively. 
 * If you want to conduct AL on the natureHTE amine dataset, with the condition-first strategy that selects substrates at regular quantiles of Tanimoto distances from the training set, selecting 3 conditions for 2 substrates, while leaving out 4 test substrates where each reaction conditions are top-class, run the command
 `python active_label_ranking.py --dataset amine --strategy condition_first --substrate_selection quantile --initialization cluster --n_conds_to_sample 3 --n_test_subs 4 -s`
 * al_results.ipynb :
