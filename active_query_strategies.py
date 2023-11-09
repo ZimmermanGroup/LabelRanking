@@ -369,3 +369,64 @@ def iteration_of_all_cond(X, y_ranking, train_inds, rem_inds, predicted_proba_ar
     y_ranking_acquired = get_y_acquired(y_ranking, rem_inds, next_subs_inds, next_cond_inds)
     return X_acquired, y_ranking_acquired, next_subs_inds
 
+def iteration_of_explore_rfr(X, y_yield, rem_inds, predicted_yield_array, n_rxns_to_sample):
+    """ Selects the next set of reactions based on highest uncertainty. 
+    
+    Parameters
+    ----------
+    X : np.ndarray of shape (n_substrates, n_features)
+        Full input array.
+    y_yield : np.ndarray of shape (n_substrates, n_rxn_conditions)
+        Yield array of all substrates.
+    rem_inds : list of ints
+        Indices that are still available for sampling.
+    predicted_yield_array : np.ndarray of shape (n_remaining_reactions, n_trees)
+        Yield predictions with current RFR.
+    n_rxns_to_sample : int
+        Number of reactions to sample.
+
+    Returns
+    -------
+    X_acquired : np.ndarray of shape (n_rxns_to_sample, n_features)
+        Input array of substrates that were subject to data collection.
+    y_yield_acquired : np.ndarray of shape (n_reactions, )
+        Yield values from the reactions collected.
+    next_rxn_inds : list of ints of length (n_rxns_to_sample)
+        Reaction indices that has been sampled from this iteration.
+    """
+    next_inds = np.argsort(np.std(predicted_yield_array, axis=1))[-1 * n_rxns_to_sample :]
+    next_rxn_inds = [rem_inds[x] for x in next_inds]
+    X_acquired = X[next_rxn_inds]
+    y_yield_acquired = y_yield.flatten()[next_rxn_inds]
+    return X_acquired, y_yield_acquired, next_rxn_inds
+
+def iteration_of_exploit_rfr(X, y_yield, rem_inds, predicted_yield_array, n_rxns_to_sample):
+    """ Selects the next set of reactions based on highest uncertainty. 
+    
+    Parameters
+    ----------
+    X : np.ndarray of shape (n_substrates, n_features)
+        Full input array.
+    y_yield : np.ndarray of shape (n_substrates, n_rxn_conditions)
+        Yield array of all substrates.
+    rem_inds : list of ints
+        Indices that are still available for sampling.
+    predicted_yield_array : np.ndarray of shape (n_remaining_reactions, n_trees)
+        Yield predictions with current RFR.
+    n_rxns_to_sample : int
+        Number of reactions to sample.
+
+    Returns
+    -------
+    X_acquired : np.ndarray of shape (n_rxns_to_sample, n_features)
+        Input array of substrates that were subject to data collection.
+    y_yield_acquired : np.ndarray of shape (n_reactions, )
+        Yield values from the reactions collected.
+    next_rxn_inds : list of ints of length (n_rxns_to_sample)
+        Reaction indices that has been sampled from this iteration.
+    """
+    next_inds = np.argsort(predicted_yield_array)[-1 * n_rxns_to_sample :]
+    next_rxn_inds = [rem_inds[x] for x in next_inds]
+    X_acquired = X[next_rxn_inds]
+    y_yield_acquired = y_yield.flatten()[next_rxn_inds]
+    return X_acquired, y_yield_acquired, next_rxn_inds

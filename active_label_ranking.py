@@ -28,7 +28,8 @@ def parse_args():
     )
     parser.add_argument(
         "--strategy",
-        choices=["condition_first", "lowest_diff", "two_condition_pairs", "all_conditions", "random", "full_rfr", "full_rpc"],
+        choices=["condition_first", "lowest_diff", "two_condition_pairs", "all_conditions", 
+                 "random", "explore_rfr", "exploit_rfr", "full_rfr", "full_rpc"],
         help="Which AL acquisition strategy to use.",
     )
     parser.add_argument(
@@ -219,6 +220,28 @@ def initial_substrate_selection(
     return initial_inds, rem_inds
 
 
+def lr_indices_to_rfr_indices(list_of_lr_indices, n_conditions=4):
+    """ Transforms a list of indices prepared for label ranking algorithms to
+    that for regressors.
+    
+    Parameters
+    ----------
+    list_of_lr_indices : list of inds
+        Indices selected for label ranking algorithms.
+    n_conditions : int
+        Number of reaction conditions considered as labels.
+    
+    Returns
+    -------
+    list_of_rfr_indices : list of inds
+        Indices for RF regressors.
+    """
+    list_of_rfr_indices = []
+    for ind in list_of_lr_indices :
+        list_of_rfr_indices.extend([n_conditions * ind + x for x in range(n_conditions)])
+    return list_of_rfr_indices
+
+
 def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
     """Conducts loops of active learning until all substrates have been sampled.
 
@@ -269,7 +292,7 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
         test_inds = test_inds_list[n_iter]
         train_smiles = [x for i, x in enumerate(smiles_list) if i in train_inds]
 
-        if parser.strategy != "full_rfr":
+        if "rfr" not in parser.strategy :
             X_test = X[test_inds]
             y_test = y_ranking[test_inds]
             y_test_yield = y_yield[test_inds]
@@ -317,105 +340,192 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                 initial_inds = initial_inds_list[n]
                 rem_inds = rem_inds_list[n]
                 copied_rem_inds = deepcopy(rem_inds)
-                X_sampled = X[initial_inds]
-                y_sampled = y_ranking[initial_inds]
 
-                rpc = RPC()
-                rpc.fit(X_sampled, y_sampled)
-                y_pred = rpc.predict(X_test)
-                rem_proba_array = rpc.predict_proba(X[rem_inds])
+                if "rfr" not in parser.strategy:
+                    X_sampled = X[initial_inds]
+                    y_sampled = y_ranking[initial_inds]
 
-                while len(rem_inds) > 2:
-                    rr_score = rr(y_test_yield, y_test, y_pred)
-                    kt_score = kt(y_test, y_pred)
-                    update_perf_dict(
-                        perf_dict, rr_score, kt_score, y_sampled.shape[0], n_iter, n
-                    )
-                    ### Strategies for sampling only 2 reaction conditions
-                    if parser.strategy == "lowest_diff":
-                        (
-                            X_acquired,
-                            y_ranking_acquired,
-                            next_subs_inds,
-                        ) = iteration_of_lowest_diff(
-                            X,
-                            y_ranking,
-                            rem_inds,
-                            rem_proba_array,
-                            parser.n_subs_to_sample,
-                            parser.n_conds_to_sample,
-                        )
-                    elif parser.strategy == "condition_first":
-                        (
-                            X_acquired,
-                            y_ranking_acquired,
-                            next_subs_inds,
-                        ) = iteration_of_cond_first(
-                            X,
-                            y_ranking,
-                            train_inds,
-                            rem_inds,
-                            rem_proba_array,
-                            parser.n_subs_to_sample,
-                            parser.n_conds_to_sample,
-                            train_smiles,
-                            parser.substrate_selection
-                        )
-                    elif parser.strategy == "two_condition_pairs":
-                        (
-                            X_acquired,
-                            y_ranking_acquired,
-                            next_subs_inds,
-                        ) = iteration_of_two_cond_pairs(
-                            X,
-                            y_ranking,
-                            train_inds,
-                            rem_inds,
-                            rem_proba_array,
-                            parser.n_subs_to_sample,
-                            parser.n_conds_to_sample,
-                            train_smiles,
-                            parser.substrate_selection
-                        )
-                    elif parser.strategy == "random":
-                        (
-                            X_acquired,
-                            y_ranking_acquired,
-                            next_subs_inds,
-                        ) = iteration_of_random(
-                            X,
-                            y_ranking,
-                            rem_inds,
-                            parser.n_subs_to_sample,
-                            parser.n_conds_to_sample,
-                        )
-                    ### Strategies for selecting all reaction conditions
-                    elif parser.n_conds_to_sample == y_ranking.shape[1]:
-                        (
-                            X_acquired,
-                            y_ranking_acquired,
-                            next_subs_inds,
-                        ) = iteration_of_all_cond(
-                            X,
-                            y_ranking,
-                            train_inds,
-                            rem_inds,
-                            rem_proba_array,
-                            parser.n_subs_to_sample,
-                            parser.n_conds_to_sample,
-                            train_smiles,
-                            parser.substrate_selection
-                        )
-                    X_sampled = np.vstack((X_sampled, X_acquired))
-                    y_sampled = np.vstack((y_sampled, y_ranking_acquired))
-                    rem_inds = [
-                        x for i, x in enumerate(rem_inds) if i not in next_subs_inds
-                    ]
+                    rpc = RPC()
                     rpc.fit(X_sampled, y_sampled)
                     y_pred = rpc.predict(X_test)
                     rem_proba_array = rpc.predict_proba(X[rem_inds])
-                if n_init > 1 and parser.n_evals == 1 :
-                    rem_inds = deepcopy(copied_rem_inds)
+
+                    while len(rem_inds) > 2:
+                        rr_score = rr(y_test_yield, y_test, y_pred)
+                        kt_score = kt(y_test, y_pred)
+                        update_perf_dict(
+                            perf_dict, rr_score, kt_score, y_sampled.shape[0], n_iter, n
+                        )
+                        ### Strategies for sampling only 2 reaction conditions
+                        if parser.strategy == "lowest_diff":
+                            (
+                                X_acquired,
+                                y_ranking_acquired,
+                                next_subs_inds,
+                            ) = iteration_of_lowest_diff(
+                                X,
+                                y_ranking,
+                                rem_inds,
+                                rem_proba_array,
+                                parser.n_subs_to_sample,
+                                parser.n_conds_to_sample,
+                            )
+                        elif parser.strategy == "condition_first":
+                            (
+                                X_acquired,
+                                y_ranking_acquired,
+                                next_subs_inds,
+                            ) = iteration_of_cond_first(
+                                X,
+                                y_ranking,
+                                train_inds,
+                                rem_inds,
+                                rem_proba_array,
+                                parser.n_subs_to_sample,
+                                parser.n_conds_to_sample,
+                                train_smiles,
+                                parser.substrate_selection
+                            )
+                        elif parser.strategy == "two_condition_pairs":
+                            (
+                                X_acquired,
+                                y_ranking_acquired,
+                                next_subs_inds,
+                            ) = iteration_of_two_cond_pairs(
+                                X,
+                                y_ranking,
+                                train_inds,
+                                rem_inds,
+                                rem_proba_array,
+                                parser.n_subs_to_sample,
+                                parser.n_conds_to_sample,
+                                train_smiles,
+                                parser.substrate_selection
+                            )
+                        elif parser.strategy == "random":
+                            (
+                                X_acquired,
+                                y_ranking_acquired,
+                                next_subs_inds,
+                            ) = iteration_of_random(
+                                X,
+                                y_ranking,
+                                rem_inds,
+                                parser.n_subs_to_sample,
+                                parser.n_conds_to_sample,
+                            )
+                        ### Strategies for selecting all reaction conditions
+                        elif parser.n_conds_to_sample == y_ranking.shape[1]:
+                            (
+                                X_acquired,
+                                y_ranking_acquired,
+                                next_subs_inds,
+                            ) = iteration_of_all_cond(
+                                X,
+                                y_ranking,
+                                train_inds,
+                                rem_inds,
+                                rem_proba_array,
+                                parser.n_subs_to_sample,
+                                parser.n_conds_to_sample,
+                                train_smiles,
+                                parser.substrate_selection
+                            )
+                        X_sampled = np.vstack((X_sampled, X_acquired))
+                        y_sampled = np.vstack((y_sampled, y_ranking_acquired))
+                        rem_inds = [
+                            x for i, x in enumerate(rem_inds) if i not in next_subs_inds
+                        ]
+                        rpc.fit(X_sampled, y_sampled)
+                        y_pred = rpc.predict(X_test)
+                        rem_proba_array = rpc.predict_proba(X[rem_inds])
+                    if n_init > 1 and parser.n_evals == 1 :
+                        rem_inds = deepcopy(copied_rem_inds)
+                
+                else :
+                    rfr_initial_inds = lr_indices_to_rfr_indices(initial_inds)
+                    rfr_rem_inds = lr_indices_to_rfr_indices(rem_inds)
+                    X_sampled = X[rfr_initial_inds]
+                    y_sampled = y_yield[initial_inds].flatten()
+
+                    gcv = GridSearchCV(
+                        RandomForestRegressor(random_state=42),
+                        param_grid={
+                            "n_estimators": [15, 30, 100],
+                            "max_depth": [3, 5, None],
+                        },
+                        scoring="r2",
+                        n_jobs=-1,
+                        cv=PredefinedSplit(
+                            np.repeat(np.arange(len(initial_inds)), y_ranking.shape[1])
+                        ),
+                    )
+                    gcv.fit(X_sampled, y_sampled)
+                    initial_rfr = gcv.best_estimator_
+                    y_pred = yield_to_ranking(
+                        initial_rfr.predict(X_test).reshape(len(test_inds), y_ranking.shape[1])
+                    )
+                    if parser.strategy == "explore_rfr" :
+                        rem_yield_array = np.zeros((len(rfr_rem_inds), len(initial_rfr.estimators_)))
+                        for i, tree in enumerate(initial_rfr.estimators_) :
+                            rem_yield_array[:, i] = tree.predict(X[rfr_rem_inds])
+                    elif parser.strategy == "exploit_rfr":
+                        rem_yield_array = initial_rfr.predict(X[rfr_rem_inds])
+
+                    count = len(initial_inds)
+                    while len(rfr_rem_inds) > 66 :
+                        rr_score = rr(y_test_yield, y_test, y_pred)
+                        kt_score = kt(y_test, y_pred)
+                        update_perf_dict(
+                            perf_dict, rr_score, kt_score, count, n_iter, n
+                        )
+                        if parser.strategy == "explore_rfr":
+                            (
+                                X_acquired,
+                                y_yield_acquired,
+                                next_rxn_inds
+                            ) = iteration_of_explore_rfr(
+                                X,
+                                y_yield,
+                                rfr_rem_inds,
+                                rem_yield_array,
+                                parser.n_subs_to_sample * parser.n_conds_to_sample,
+                            )
+                        elif parser.strategy == "exploit_rfr" :
+                            (
+                                X_acquired,
+                                y_yield_acquired,
+                                next_rxn_inds
+                            ) = iteration_of_exploit_rfr(
+                                X,
+                                y_yield,
+                                rfr_rem_inds,
+                                rem_yield_array,
+                                parser.n_subs_to_sample * parser.n_conds_to_sample,
+                            )
+                        X_sampled = np.vstack((X_sampled, X_acquired))
+                        y_sampled = np.concatenate((y_sampled, y_yield_acquired))
+                        rfr_rem_inds = [
+                            x for x in rfr_rem_inds if x not in next_rxn_inds
+                        ]
+                        print(f"{count} Sampled")
+                        print(f"{len(rfr_rem_inds)} remaining reaction candidates")
+                        for ind in next_rxn_inds : 
+                            print(f"Sampled substrate {ind //4}, condition {ind %4}")
+                        print()
+                        gcv.fit(X_sampled, y_sampled)
+                        y_pred = yield_to_ranking(
+                            gcv.predict(X_test).reshape(len(test_inds), y_ranking.shape[1])
+                        )
+                        if parser.strategy == "explore_rfr" :
+                            rem_yield_array = np.zeros((len(rfr_rem_inds), len(initial_rfr.estimators_)))
+                            for i, tree in enumerate(initial_rfr.estimators_) :
+                                rem_yield_array[:, i] = tree.predict(X[rfr_rem_inds])
+                        elif parser.strategy == "exploit_rfr":
+                            rem_yield_array = initial_rfr.predict(X[rfr_rem_inds])
+                        count += parser.n_subs_to_sample
+                    # if n_init > 1 and parser.n_evals == 1 :
+                    #     rem_inds = deepcopy(copied_rem_inds)
 
         elif parser.strategy == "full_rpc":
             X_train = X[train_inds]
@@ -480,7 +590,7 @@ def main(parser):
         dataset = ScienceDataset(False, parser.dataset, 1)
         smiles_list = dataset.smiles_list
 
-    if parser.strategy == "full_rfr":
+    if "rfr" in parser.strategy :
         # Please note that we do not consider training a regressor for any of the Science datasets.
         regressor_dataset = NatureDataset(True, parser.dataset, 1)
         X = regressor_dataset.X_fp
