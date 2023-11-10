@@ -3,6 +3,7 @@ from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator, DataStructs
 from copy import deepcopy
 from scipy.stats.mstats import rankdata
+from itertools import combinations
 
 def get_y_acquired(y_ranking, rem_inds, next_subs_inds, next_cond_inds):
     """Prepares the partial ranking array.
@@ -368,6 +369,172 @@ def iteration_of_all_cond(X, y_ranking, train_inds, rem_inds, predicted_proba_ar
     X_acquired = X[next_subs_inds]
     y_ranking_acquired = get_y_acquired(y_ranking, rem_inds, next_subs_inds, next_cond_inds)
     return X_acquired, y_ranking_acquired, next_subs_inds
+
+def iteration_of_score_overlap(
+    X,
+    y_ranking,
+    rem_inds,
+    score_array,
+    n_subs_to_sample,
+    n_conds_to_sample,
+) :
+    """ Queries samples where the top choice's score's low-end overlaps with the last choice's high end.
+    The range is determined by models of different parameters. 
+    Once there's no overlap with the top choice, move onto the second top choice
+    
+    Parameters
+    ----------
+    others are same as above.
+
+    score_array : np.ndarray of shape (n_substrates, n_labels, n_models)
+        Score array (which adds predicted probability values across the last reaction condition axis)
+          from an ensemble of RPC models with different hyperparameters.
+    
+    C : list of floats
+        Values of inverse strength of regularization to screen.
+    
+    penalty : list of str
+        Regularization forms to consider.
+    
+    Returns
+    -------
+    Same as others.
+    """
+    diffs = np.zeros((score_array.shape[0], score_array.shape[1] - 1))
+    diff_conds = np.zeros((score_array.shape[0], score_array.shape[1]))
+    for i, (score_row, std_row) in enumerate(zip(np.mean(score_array, axis=2), np.std(score_array, axis=2))) :
+        sorted_inds = np.argsort(score_row)
+        max_cond = sorted_inds[-1]
+        diff_conds[i, 0] = max_cond
+        for j, smaller_ind in enumerate(sorted_inds[:-1]) :
+            diffs[i, j] = (np.max(score_row) - std_row[max_cond]) -\
+                  (score_row[smaller_ind] + std_row[smaller_ind])
+            diff_conds[i, j+1] = smaller_ind
+    next_subs_inds = []
+    next_cond_inds = []
+    # print(diff_conds)
+    # print()
+    # print(diffs)
+    
+    for i in range(diffs.shape[1]) :
+        if len(next_subs_inds) < n_subs_to_sample :
+            overlap = np.where(diffs[:, i] < 0)[0]
+            # print(i, overlap)
+            if len(overlap) > 0 :
+                sampled_subs_inds = []
+                for subs_ind in np.argsort(diffs[:, i]) :
+                    if len(next_subs_inds) < n_subs_to_sample :
+                        if subs_ind not in next_subs_inds :
+                            next_subs_inds.append(subs_ind)
+                            sampled_subs_inds.append(subs_ind)
+                    else :
+                        continue
+                for ind in sampled_subs_inds : 
+                    next_cond_inds.append([diff_conds[ind, 0], diff_conds[ind, i]])
+            else :
+                continue
+        else :
+            continue
+    # print(next_subs_inds)
+    # print(next_cond_inds)
+    # print()
+
+    # After some iterations, there's no more overlap between the estimated top choice.
+    # Move onto looking at overlaps with the second top choice
+    if len(next_subs_inds) == 0 :
+        diffs = np.zeros((score_array.shape[0], score_array.shape[1] - 2))
+        diff_conds = np.zeros((score_array.shape[0], score_array.shape[1]-1))
+        for i, (score_row, std_row) in enumerate(zip(np.mean(score_array, axis=2), np.std(score_array, axis=2))) :
+            sorted_inds = np.argsort(score_row)
+            sec_cond = sorted_inds[-2]
+            diff_conds[i, 0] = sec_cond
+            for j, smaller_ind in enumerate(sorted_inds[:-2]) :
+                diffs[i, j] = (score_row[sec_cond] - std_row[sec_cond]) -\
+                    (score_row[smaller_ind] + std_row[smaller_ind])
+                diff_conds[i, j+1] = smaller_ind
+        
+        for i in range(diffs.shape[1]) :
+            if len(next_subs_inds) < n_subs_to_sample :
+                overlap = np.where(diffs[:, i] < 0)[0]
+                # print(i, overlap)
+                if len(overlap) > 0 :
+                    sampled_subs_inds = []
+                    for subs_ind in np.argsort(diffs[:, i]) :
+                        if len(next_subs_inds) < n_subs_to_sample :
+                            if subs_ind not in next_subs_inds :
+                                next_subs_inds.append(subs_ind)
+                                sampled_subs_inds.append(subs_ind)
+                        else :
+                            continue
+                    for ind in sampled_subs_inds : 
+                        next_cond_inds.append([diff_conds[ind, 0], diff_conds[ind, i]])
+                else :
+                    continue
+            else :
+                continue
+        # print(next_subs_inds)
+        # print(next_cond_inds)
+        # print()
+    # Lastly just grab the ones with smallest gap between 2nd and 3rd choices
+    if len(next_subs_inds) == 0 :
+        # print("DIFFS", diffs)
+        subs_inds, cond_inds = np.unravel_index(np.argsort(diffs, axis=None), shape=diffs.shape)
+        # print("SUBS IND", subs_inds, "COND IND", cond_inds)
+        next_subs_inds.extend(list(subs_inds[:n_subs_to_sample]))
+        for j, ind in enumerate(subs_inds[:n_subs_to_sample]):
+            next_cond_inds.append([diff_conds[ind, 0], diff_conds[ind, cond_inds[j]]])
+        # print(next_subs_inds)
+        # print(next_cond_inds)
+        # print()
+
+    X_acquired = X[[rem_inds[x] for x in next_subs_inds]]
+    y_ranking_acquired = get_y_acquired(
+        y_ranking, rem_inds, next_subs_inds, next_cond_inds
+    )
+    return X_acquired, y_ranking_acquired, next_subs_inds
+
+
+def iteration_of_highest_disagreement(
+    X,
+    y_ranking,
+    rem_inds,
+    ensemble_of_predicted_proba,
+    n_subs_to_sample,
+) :
+    """ Selects substrate and conditions pairs which have highest value of ...
+    |int(n_models // 2) - n_models_predicting_positive| + mean_positive_pred_proba - mean_negative_pred_proba 
+    which corresponds to datapoints where the models disagree between each other the most.
+
+    Parameters
+    ----------
+    ensemble_of_predicted_proba : list (of length n_models) of np.ndarrays of shape (n_substrates, n_labels, n_labels)
+        Predicted proba arrays from each of the models considered for the ensemble.
+
+    Returns
+    -------
+    same as others.
+    """
+    disagreement_score_array = np.zeros_like(ensemble_of_predicted_proba[0])
+    for subs_ind in range(ensemble_of_predicted_proba[0].shape[0]) :
+        combined_proba_array = np.stack(
+            (x[subs_ind, :, :] for x in ensemble_of_predicted_proba),
+            axis = 2
+        )
+        for (row, col) in combinations(range(ensemble_of_predicted_proba[0].shape[1]), 2) :
+            sub_array = combined_proba_array[row, col]
+            pos_inds = np.where(sub_array > 0.5)[0]
+            neg_inds = np.where(sub_array <= 0.5)[0]
+            disagreement_score_array[subs_ind, row, col] = abs(len(ensemble_of_predicted_proba) - max(len(pos_inds), len(neg_inds))) +\
+                np.mean(sub_array[pos_inds]) - np.mean(sub_array[neg_inds])
+    sorted_inds = np.unravel_index(np.argsort(disagreement_score_array, axis=None), disagreement_score_array.shape)
+    next_subs_inds = [sorted_inds[0][-1 * n_subs_to_sample :]]
+    next_cond_inds = [[sorted_inds[1][-1*x], sorted_inds[2][-1*x]] for x in range(n_subs_to_sample)]
+    X_acquired = X[[rem_inds[x] for x in next_subs_inds]]
+    y_ranking_acquired = get_y_acquired(
+        y_ranking, rem_inds, next_subs_inds, next_cond_inds
+    )
+    return X_acquired, y_ranking_acquired, next_subs_inds
+    
 
 def iteration_of_explore_rfr(X, y_yield, rem_inds, predicted_yield_array, n_rxns_to_sample):
     """ Selects the next set of reactions based on highest uncertainty. 

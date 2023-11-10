@@ -12,6 +12,7 @@ from sklearn.model_selection import GridSearchCV, PredefinedSplit, train_test_sp
 from sklearn.ensemble import RandomForestRegressor
 import os
 from tqdm import tqdm
+from itertools import product
 from active_query_strategies import *
 
 import argparse
@@ -29,7 +30,8 @@ def parse_args():
     parser.add_argument(
         "--strategy",
         choices=["condition_first", "lowest_diff", "two_condition_pairs", "all_conditions", 
-                 "random", "explore_rfr", "exploit_rfr", "full_rfr", "full_rpc"],
+                 "random", "score_overlap", "highest_disagreement",
+                 "explore_rfr", "exploit_rfr", "full_rfr", "full_rpc"],
         help="Which AL acquisition strategy to use.",
     )
     parser.add_argument(
@@ -414,6 +416,43 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                                 parser.n_subs_to_sample,
                                 parser.n_conds_to_sample,
                             )
+                        elif parser.strategy in ["score_overlap", "highest_disagreement"] :
+                            C = [0.1,0.3,1,3]
+                            penalty = ["l1", "l2"]
+                            rpc_ensemble = []
+                            for c_val, penalty_val in product(C, penalty) :
+                                rpc = RPC(C=c_val, penalty=penalty_val)
+                                rpc.fit(X_sampled, y_sampled)
+                                rpc_ensemble.append(rpc)
+                            proba_ensemble = [np.sum(x.predict_proba(X[rem_inds]), axis=2) for x in rpc_ensemble]
+                            score_array = np.stack(tuple(proba_ensemble), axis=2)
+
+                            if parser.strategy == "score_overlap":
+                                (
+                                    X_acquired,
+                                    y_ranking_acquired,
+                                    next_subs_inds,
+                                ) = iteration_of_score_overlap(
+                                    X,
+                                    y_ranking,
+                                    rem_inds,
+                                    score_array,
+                                    parser.n_subs_to_sample,
+                                    parser.n_conds_to_sample,
+                                )
+                            elif parser.strategy == "highest_disagreement" :
+                                (
+                                    X_acquired,
+                                    y_ranking_acquired,
+                                    next_subs_inds,
+                                ) = iteration_of_highest_disagreement(
+                                    X,
+                                    y_ranking,
+                                    rem_inds,
+                                    proba_ensemble,
+                                    parser.n_subs_to_sample,
+                                )
+
                         ### Strategies for selecting all reaction conditions
                         elif parser.n_conds_to_sample == y_ranking.shape[1]:
                             (
@@ -508,11 +547,11 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                         rfr_rem_inds = [
                             x for x in rfr_rem_inds if x not in next_rxn_inds
                         ]
-                        print(f"{count} Sampled")
-                        print(f"{len(rfr_rem_inds)} remaining reaction candidates")
-                        for ind in next_rxn_inds : 
-                            print(f"Sampled substrate {ind //4}, condition {ind %4}")
-                        print()
+                        # print(f"{count} Sampled")
+                        # print(f"{len(rfr_rem_inds)} remaining reaction candidates")
+                        # for ind in next_rxn_inds : 
+                        #     print(f"Sampled substrate {ind //4}, condition {ind %4}")
+                        # print()
                         gcv.fit(X_sampled, y_sampled)
                         y_pred = yield_to_ranking(
                             gcv.predict(X_test).reshape(len(test_inds), y_ranking.shape[1])
@@ -606,7 +645,10 @@ def main(parser):
     if parser.save:
         filename = f"performance_excels/AL/{parser.dataset}_{parser.n_initial_subs}_{parser.n_conds_to_sample}_{parser.n_subs_to_sample}_{parser.n_test_subs}.xlsx"
         if parser.substrate_selection == None or parser.strategy == "random":
-            sheetname = f"{parser.strategy}_{parser.initialization}"
+            if parser.strategy in ["score_overlap", "highest_disagreement"] :
+                sheetname = f"{parser.strategy.split('_')[1]}_{parser.initialization}"
+            else :
+                sheetname = f"{parser.strategy}_{parser.initialization}"
         else :
             if parser.strategy == "two_condition_pairs":
                 strategyname = "two_condition"
