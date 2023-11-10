@@ -424,6 +424,7 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                                 rpc = RPC(C=c_val, penalty=penalty_val)
                                 rpc.fit(X_sampled, y_sampled)
                                 rpc_ensemble.append(rpc)
+                            pred_proba_ensemble = [x.predict_proba(X[rem_inds]) for x in rpc_ensemble]
                             proba_ensemble = [np.sum(x.predict_proba(X[rem_inds]), axis=2) for x in rpc_ensemble]
                             score_array = np.stack(tuple(proba_ensemble), axis=2)
 
@@ -449,7 +450,7 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                                     X,
                                     y_ranking,
                                     rem_inds,
-                                    proba_ensemble,
+                                    pred_proba_ensemble,
                                     parser.n_subs_to_sample,
                                 )
 
@@ -512,7 +513,7 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                         rem_yield_array = initial_rfr.predict(X[rfr_rem_inds])
 
                     count = len(initial_inds)
-                    while len(rfr_rem_inds) > 66 :
+                    while len(rfr_rem_inds) > 66 : # Need to fix for other datasets
                         rr_score = rr(y_test_yield, y_test, y_pred)
                         kt_score = kt(y_test, y_pred)
                         update_perf_dict(

@@ -517,7 +517,7 @@ def iteration_of_highest_disagreement(
     disagreement_score_array = np.zeros_like(ensemble_of_predicted_proba[0])
     for subs_ind in range(ensemble_of_predicted_proba[0].shape[0]) :
         combined_proba_array = np.stack(
-            (x[subs_ind, :, :] for x in ensemble_of_predicted_proba),
+            tuple([x[subs_ind, :, :] for x in ensemble_of_predicted_proba]),
             axis = 2
         )
         for (row, col) in combinations(range(ensemble_of_predicted_proba[0].shape[1]), 2) :
@@ -526,9 +526,13 @@ def iteration_of_highest_disagreement(
             neg_inds = np.where(sub_array <= 0.5)[0]
             disagreement_score_array[subs_ind, row, col] = abs(len(ensemble_of_predicted_proba) - max(len(pos_inds), len(neg_inds))) +\
                 np.mean(sub_array[pos_inds]) - np.mean(sub_array[neg_inds])
+    disagreement_score_array *= -1
     sorted_inds = np.unravel_index(np.argsort(disagreement_score_array, axis=None), disagreement_score_array.shape)
-    next_subs_inds = [sorted_inds[0][-1 * n_subs_to_sample :]]
+    next_subs_inds = [x for x in sorted_inds[0][-1 * n_subs_to_sample :]]
     next_cond_inds = [[sorted_inds[1][-1*x], sorted_inds[2][-1*x]] for x in range(n_subs_to_sample)]
+    # print(next_subs_inds)
+    # print(next_cond_inds)
+    # print()
     X_acquired = X[[rem_inds[x] for x in next_subs_inds]]
     y_ranking_acquired = get_y_acquired(
         y_ranking, rem_inds, next_subs_inds, next_cond_inds
