@@ -3,6 +3,7 @@ import pandas as pd
 from copy import deepcopy
 from rdkit import Chem, DataStructs
 from rdkit.Chem import rdFingerprintGenerator
+from sklearn.preprocessing import OneHotEncoder
 from abc import ABC
 import joblib
 
@@ -1056,4 +1057,166 @@ class ScienceDataset(Dataset):
             self._y_ranking = np.delete(yield_to_ranking(self.df.iloc[:, 1:].to_numpy()), self.nan_ind[0], 0)
         else :
             self._y_ranking = yield_to_ranking(self.df.iloc[:, 1:].to_numpy())
+        return self._y_ranking
+    
+
+class UllmannDataset(Dataset):
+    """ Prepares Ullmann coupling dataset prepared by Sigman. 2023
+    Considers only Ligands 19~36
+
+    Parameters
+    ----------
+    for_regressor : bool
+        Whether the input will be used for training a regressor.
+    n_rxns : int
+        Number of reactions that we simulate to select and conduct.
+    component_to_rank : str {'amine', 'amide', 'sulfonamide'}
+        Which substrate dataset type to use.
+        Although 'substrate_to_rank' is a better name, using this for consistency. 
+    """
+    def __init__(self, for_regressor, n_rxns):
+        super().__init__(for_regressor, n_rxns)
+        
+        # Reading in the raw dataset
+        self.rxn_df = pd.read_excel("datasets/computed_data.xlsx", sheet_name="expt_data")
+        self.ligand_desc = pd.read_excel("datasets/computed_data.xlsx", sheet_name="DFT_lig")
+        self.amine_desc = pd.read_excel("datasets/computed_data.xlsx", sheet_name="DFT_am")
+        self.arbr_desc = pd.read_excel("datasets/computed_data.xlsx", sheet_name="DFT_arbr")
+
+
+    @property
+    def X_fp(self, fpSize=1024, radius=3):
+        """
+        Prepares fingerprint arrays of substrates.
+        For regressors, other descriptors are appended after the substrate fingerprint.
+
+        Parameters
+        ----------
+        fpSize : int
+            Length of the Morgan FP.
+        radius : int
+            Radius of the Morgan FP.
+
+        Returns
+        -------
+        X_fp : np.ndarray of shape (n_rxns, n_features)
+            n_features depends on self.for_regressor
+        """
+        mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=fpSize)
+        arbr_lookup = {
+            row["Compound_Name"]:mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(row["smiles"])) 
+            for _, row in self.arbr_desc.iterrows()
+        }
+        amine_lookup = {
+            row["Compound_Name"]:mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(row["smiles"])) 
+            for _, row in self.amine_desc.iterrows()
+        }
+        ligand_lookup = {
+            row["Compound_Name"]:mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(row["smiles"])) 
+            for _, row in self.ligand_desc.iterrows()
+        }
+        fp_rows = []
+        prods = []
+        for i, row in self.rxn_df.iterrows():
+            if int(row["Product"][1:]) < 200 and row["Ligands"][-2] != "_" and int(row["Ligands"][-2:]) >= 19 :
+                if self.for_regressor :
+                    fp_rows.append(
+                        np.concatenate((
+                            arbr_lookup[row["Aryl_Bromide"]],
+                            amine_lookup[row["Amine"]],
+                            ligand_lookup[row["Ligands"]]
+                        )).reshape(1,-1)
+                    )
+                else :
+                    if row["Product"] not in prods :
+                        fp_rows.append(
+                            np.concatenate((
+                                arbr_lookup[row["Aryl_Bromide"]],
+                                amine_lookup[row["Amine"]]
+                            )).reshape(1,-1)
+                        )
+                        prods.append(row["Product"])                        
+        self._X_fp = np.vstack(tuple(fp_rows))
+        return self._X_fp
+    
+
+    @property
+    def X_desc(self):
+        """ Prepares array of descriptors as prepared by the authors."""
+        arbr_lookup = {
+            row["Compound_Name"]:row.iloc[2:].to_numpy().flatten()
+            for _, row in self.arbr_desc.iterrows()
+        }
+        amine_lookup = {
+            row["Compound_Name"]:row.iloc[2:].to_numpy().flatten()
+            for _, row in self.amine_desc.iterrows()
+        }
+        ligand_lookup = {
+            row["Compound_Name"]:row.iloc[2:].to_numpy().flatten()
+            for _, row in self.ligand_desc.iterrows()
+        }
+        desc_rows = []
+        prods = []
+        for i, row in self.rxn_df.iterrows():
+            if int(row["Product"][1:]) < 200 and row["Ligands"][-2] != "_" and int(row["Ligands"][-2:]) >= 19 :
+                if self.for_regressor :
+                    desc_rows.append(
+                        np.concatenate((
+                            arbr_lookup[row["Aryl_Bromide"]],
+                            amine_lookup[row["Amine"]],
+                            ligand_lookup[row["Ligands"]]
+                        )).reshape(1,-1)
+                    )
+                else :
+                    if row["Product"] not in prods :
+                        desc_rows.append(
+                            np.concatenate((
+                                arbr_lookup[row["Aryl_Bromide"]],
+                                amine_lookup[row["Amine"]]
+                            )).reshape(1,-1)
+                        )
+                        prods.append(row["Product"])
+        self._X_desc = np.vstack(tuple(desc_rows))
+        return self._X_desc
+    
+    @property
+    def X_onehot(self):
+        "Prepares onehot arrays."
+        prod_list = []
+        onehot_rows = []
+        for i, row in self.rxn_df.iterrows(): 
+            if int(row["Product"][1:]) < 200 and row["Ligands"][-2] != "_" and int(row["Ligands"][-2:]) >= 19 :
+                if self.for_regressor :
+                    onehot_rows.append(row[1:-1])
+                else :
+                    if row["Product"] not in prod_list :
+                        onehot_rows.append(row[1:3])
+                        prod_list.append(row["Product"])
+        ohe = OneHotEncoder(handle_unknown="ignore")
+        self._X_onehot = ohe.fit_transform(onehot_rows)
+        self._ohe = ohe
+        return self._X_onehot
+    
+    @property
+    def y_yield(self):
+        if self.for_regressor : 
+            y_list = []
+            for i, row in self.rxn_df.iterrows(): 
+                if int(row["Product"][1:]) < 200 and row["Ligands"][-2] != "_" and int(row["Ligands"][-2:]) >= 19 :
+                    y_list.append(row["Yield"])
+            self._y_yield = np.array(y_list)
+        else :
+            all_prods = self.rxn_df["Product"].unique()
+            prods = [x for x in all_prods if int(x[1:])< 200]
+            y_array = -1 * np.ones((len(prods), 18)) # 18 : L19 ~ L36
+            for i, row in self.rxn_df.iterrows(): 
+                if int(row["Product"][1:]) < 200 and row["Ligands"][-2] != "_" and int(row["Ligands"][-2:]) >= 19 :
+                    y_array[prods.index(row["Product"]), int(row["Ligands"][-2:])-19] = row["Yield"]
+            y_array[y_array < 0] = np.nan
+            self._y_yield = y_array
+        return self._y_yield
+
+    @property
+    def y_ranking(self):
+        self._y_ranking = yield_to_ranking(self.y_yield)
         return self._y_ranking
