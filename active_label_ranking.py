@@ -352,7 +352,7 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                     y_pred = rpc.predict(X_test)
                     rem_proba_array = rpc.predict_proba(X[rem_inds])
 
-                    while len(rem_inds) > 2:
+                    while len(rem_inds) >= max(2, parser.n_subs_to_sample):
                         rr_score = rr(y_test_yield, y_test, y_pred)
                         kt_score = kt(y_test, y_pred)
                         update_perf_dict(
@@ -478,7 +478,8 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                         ]
                         rpc.fit(X_sampled, y_sampled)
                         y_pred = rpc.predict(X_test)
-                        rem_proba_array = rpc.predict_proba(X[rem_inds])
+                        if len(rem_inds) > 0 :
+                            rem_proba_array = rpc.predict_proba(X[rem_inds])
                     if n_init > 1 and parser.n_evals == 1 :
                         rem_inds = deepcopy(copied_rem_inds)
                 
