@@ -45,6 +45,12 @@ def parse_args():
         help="How to select the substrates for the condition-first and two-condition-pair strategies."
     )
     parser.add_argument(
+        "--ensemble",
+        default="parameters",
+        choices=["parameters", "mask"],
+        help="How to prepare an ensemble of RPC models."
+    )
+    parser.add_argument(
         "--n_initial_subs",
         default=6,
         type=int,
@@ -417,13 +423,32 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                                 parser.n_conds_to_sample,
                             )
                         elif parser.strategy in ["score_overlap", "highest_disagreement"] :
-                            C = [0.1,0.3,1,3]
-                            penalty = ["l1", "l2"]
                             rpc_ensemble = []
-                            for c_val, penalty_val in product(C, penalty) :
-                                rpc = RPC(C=c_val, penalty=penalty_val)
-                                rpc.fit(X_sampled, y_sampled)
-                                rpc_ensemble.append(rpc)
+                            if parser.ensemble == "parameters":
+                                C = [0.1,0.3,1,3]
+                                penalty = ["l1", "l2"]
+                                for c_val, penalty_val in product(C, penalty) :
+                                    rpc = RPC(C=c_val, penalty=penalty_val)
+                                    rpc.fit(X_sampled, y_sampled)
+                                    rpc_ensemble.append(rpc)
+                            elif parser.ensemble == "mask":
+                                for mask_num in range(20) : # Prepare 20 different masked X's
+                                    list_of_inds_to_mask = (
+                                        np.random.choice(parser.n_initial_subs, int(parser.n_initial_subs//2), replace=False), 
+                                        np.random.choice(y_ranking.shape[1], int(parser.n_initial_subs//2))
+                                    )
+                                    masked_y = deepcopy(y_sampled).astype(float)
+                                    masked_y[list_of_inds_to_mask] = np.nan
+                                    if mask_num == 0 : 
+                                        print("Full sampled y")
+                                        print(y_sampled)
+                                        print("Masked y")
+                                        print(masked_y)
+                                        print()
+                                    rpc = RPC()
+                                    rpc.fit(X_sampled, masked_y)
+                                    rpc_ensemble.append(rpc)
+
                             pred_proba_ensemble = [x.predict_proba(X[rem_inds]) for x in rpc_ensemble]
                             proba_ensemble = [np.sum(x.predict_proba(X[rem_inds]), axis=2) for x in rpc_ensemble]
                             score_array = np.stack(tuple(proba_ensemble), axis=2)
@@ -648,7 +673,7 @@ def main(parser):
         filename = f"performance_excels/AL/{parser.dataset}_{parser.n_initial_subs}_{parser.n_conds_to_sample}_{parser.n_subs_to_sample}_{parser.n_test_subs}.xlsx"
         if parser.substrate_selection == None or parser.strategy == "random":
             if parser.strategy in ["score_overlap", "highest_disagreement"] :
-                sheetname = f"{parser.strategy.split('_')[1]}_{parser.initialization}"
+                sheetname = f"{parser.strategy.split('_')[1]}_{parser.ensemble}_{parser.initialization}"
             else :
                 sheetname = f"{parser.strategy}_{parser.initialization}"
         else :
