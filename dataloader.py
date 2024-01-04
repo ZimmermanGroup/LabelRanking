@@ -1003,7 +1003,7 @@ class ScienceDataset(Dataset):
             self.df = pd.read_excel(
                 "datasets/science_dark/science_dark.xlsx",
                 sheet_name = "Tab S2. Whole molecule data",
-                usecols=["Canonical_Smiles", "Cu TWC Product Area%", "Ir TWC Product Area%", "Pd TWC Product Area", "Ru TWC Product Area%"]
+                usecols=["Canonical_Smiles", "Cu TWC Product Area%", "Ir TWC Product Area%", "Pd TWC Product Area%", "Ru TWC Product Area%"]
             )
             if self.component_to_rank == "whole_bromide":
                 self.df = self.df.iloc[:192, :]
@@ -1220,3 +1220,31 @@ class UllmannDataset(Dataset):
     def y_ranking(self):
         self._y_ranking = yield_to_ranking(self.y_yield)
         return self._y_ranking
+
+
+class BorylationDataset(Dataset) :
+    """ Prepares borylation dataset prepared by Schneider, 2023
+    
+    Parameters
+    ----------
+    for_regressor : bool
+        Whether the input will be used for training a regressor.
+    n_rxns : int
+        Number of reactions that we simulate to select and conduct.
+    component_to_rank : str {'amine', 'amide', 'sulfonamide'}
+        Which substrate dataset type to use.
+        Although 'substrate_to_rank' is a better name, using this for consistency. 
+    """
+    def __init__(self, for_regressor, n_rxns):
+        super().__init__(for_regressor, n_rxns)
+        
+        # Reading in the raw dataset
+        self.rxn_df = pd.read_csv("datasets/borylation.csv", usecols=[1, 9, 13, 16])
+
+        # Drop reactions involving acetonitrile as they are obviously bad-performing.
+        # Almost never within the top-6  choices
+
+        # Drop substrates that has no positives
+
+        # Remove ligand 5 that also has relatively low rank + to keep balance with # of labels to data
+
