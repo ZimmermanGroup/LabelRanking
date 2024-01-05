@@ -1,6 +1,6 @@
 import argparse
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import GridSearchCV, PredefinedSplit
+from sklearn.model_selection import GridSearchCV, PredefinedSplit, StratifiedKFold
 from sklr.tree import DecisionTreeLabelRanker
 
 from dataloader import *
@@ -132,6 +132,8 @@ def lr_names_to_model_objs(lr_names, inner_ps):
     ----------
     lr_names : list of str
         Names of label ranking algorithms to consider.
+    inner_ps : PredefinedSplit object or int
+        How to split dataset for training
 
     Returns
     -------
@@ -517,6 +519,108 @@ def run_deoxy(parser):
     return perf_dicts
 
 
+def run_maldi(parser):
+    """Runs model evaluations on the Science MALDI dataset as defined by the parser.
+
+    Parameters
+    ----------
+    parser: argparse object.
+
+    Returns
+    -------
+    perf_dicts : dict
+        key : model type
+        val : list of (or a single) performance dictionaries
+    """
+    # Initialization
+    # This dataset has only four reaction conditions.
+    # So uses the label_component of parser as the dataset to test upon.
+    label_component = parser.label_component[0]
+    lr_algorithms, classifiers = parse_algorithms(parser)
+    n_rxns = 1  # Since there are only 4 reaction condition candidates
+    if parser.n_missing_reaction > 0:
+        n_evals = N_EVALS
+    else:
+        n_evals = 1
+    # Evaluations
+    perf_dicts = []
+
+    # Getting the splits to be used across all algorithms
+    ranking_dataset = ScienceDataset(False, label_component, n_rxns)
+    X = ranking_dataset.X_fp
+    top_condition = np.where(ranking_dataset.y_ranking == 1)[1]
+    skf = StratifiedKFold(n_splits=4, shuffle=True, random_state=42)
+    outer_ps = -1 * np.ones(X.shape[0])
+    for fold, (_, test) in enumerate(skf.split(X, top_condition)):
+        outer_ps[test] = fold
+    outer_ps = PredefinedSplit(outer_ps)
+        
+    if parser.rfr:
+        dataset = ScienceDataset(True, label_component, n_rxns)
+        evaluator = RegressorEvaluator(
+            dataset,
+            parser.feature,
+            n_rxns,
+            [
+                GridSearchCV(
+                    RandomForestRegressor(random_state=42),
+                    param_grid={
+                        "n_estimators": [30, 100, 200],
+                        "max_depth": [5, 10, None],
+                    },
+                    scoring="r2",
+                    n_jobs=-1,
+                    cv=4,
+                )
+            ],
+            ["RFR"],
+            outer_ps,
+            parser.n_missing_reaction,
+            n_evals,
+        ).train_and_evaluate_models()
+        perf_dicts.append(evaluator.perf_dict)
+
+    if parser.baseline or len(lr_algorithms) > 0 or len(classifiers) > 0:
+        if parser.baseline:
+            baseline_evaluator = BaselineEvaluator(
+                ranking_dataset, n_rxns, outer_ps, parser.n_missing_reaction, n_evals
+            )
+            baseline_CV = baseline_evaluator.train_and_evaluate_models()
+            perf_dicts.append(baseline_CV.perf_dict)
+            
+        # TODO : not sure if the previous functions can handle multiple evaluation rxns.
+        if len(lr_algorithms) > 0:
+            lr_names = deepcopy(lr_algorithms)
+            lr_algorithms = lr_names_to_model_objs(lr_algorithms, 4)
+            label_ranking_evaluator = LabelRankingEvaluator(
+                ranking_dataset,
+                parser.feature,
+                n_rxns,
+                lr_names,
+                lr_algorithms,
+                outer_ps,
+                parser.n_missing_reaction,
+                n_evals,
+            )
+            label_ranking_CV = label_ranking_evaluator.train_and_evaluate_models()
+            perf_dicts.append(label_ranking_CV.perf_dict)
+            
+        if len(classifiers) > 0:
+            classifier_evaluator = MulticlassEvaluator(
+                ranking_dataset,
+                parser.feature,
+                n_rxns,
+                classifiers,
+                outer_ps,
+                parser.n_missing_reaction,
+                n_evals,
+            ).train_and_evaluate_models()
+            classifier_CV = classifier_evaluator.train_and_evaluate_models()
+            perf_dicts.append(classifier_CV.perf_dict)
+
+    return perf_dicts
+
+
 def parse_perf_dicts(parser, perf_dicts):
     """
     Process the performance dicts.
@@ -581,6 +685,8 @@ def main(parser):
         perf_dicts = run_informer(parser)
     elif parser.dataset == "natureHTE":
         perf_dicts = run_nature(parser)
+    elif parser.dataset == "scienceMALDI":
+        perf_dicts = run_maldi(parser)
     parse_perf_dicts(parser, perf_dicts)
 
 

@@ -209,14 +209,21 @@ class Evaluator(ABC):
             Distance of test compound to all other training compounds.
         """
         train_dists = np.vstack(
-            tuple([row for ind, row in enumerate(dist_array) if ind != test_ind])
+            tuple([row for ind, row in enumerate(dist_array) if ind not in test_ind]) # used to be != instead of not in
         )
         train_dists = train_dists[
-            :, [x for x in range(train_dists.shape[1]) if x != test_ind]
+            :, [x for x in range(train_dists.shape[1]) if x not in test_ind]
         ]
-        test_dists = dist_array[
-            test_ind, [x for x in range(dist_array.shape[1]) if x != test_ind]
-        ]
+        print("DIST ARRAY SHAPE", dist_array.shape)
+        if len(test_ind) == 1 :
+            test_dists = dist_array[
+                test_ind, [x for x in range(dist_array.shape[1]) if x != test_ind]
+            ]
+        else :
+            test_dists = np.vstack(tuple(
+                [dist_array[x, [a for a in range(dist_array.shape[1]) if a not in test_ind]] for x in test_ind]
+            ))
+            print("DIST SHAPES", train_dists.shape, test_dists.shape)
         return train_dists, test_dists
 
     @abstractmethod
@@ -238,6 +245,10 @@ class Evaluator(ABC):
             shape = (31, self.dataset.n_rank_component)
         elif type(self.dataset) == dataloader.InformerDataset:
             shape = (10, self.dataset.n_rank_component)
+        elif type(self.dataset) == dataloader.ScienceDataset :
+            # TODO need to fix so that the shape[0] corresponds to the num rows in test fold
+            shape = (self.dataset.y_ranking.shape[0], self.dataset.n_rank_component)
+            print("SHAPE", shape)
         for i in range(self.n_evaluations):
             random_numbers = np.random.rand(shape[0], shape[1])
             list_of_inds_to_cover.append(
@@ -325,6 +336,7 @@ class Evaluator(ABC):
                         y_train = np.nanargmax(y_train_missing, axis=1)
                     # For label ranking
                     else:
+                        print("INDS TO ERASE", inds_to_erase)
                         y_train_missing = deepcopy(y_train).astype(float)
                         y_train_missing[inds_to_erase] = np.nan
                         if type(self) == LabelRankingEvaluator:
@@ -393,7 +405,8 @@ class Evaluator(ABC):
                                 dist_array, test_ind
                             )
                             model.fit(train_dists, y_train)
-                            test_dists = test_dists.reshape(1, -1)
+                            if type(self.dataset) != dataloader.ScienceDataset :
+                                test_dists = test_dists.reshape(1, -1)
                         else:
                             model.fit(X_train, y_train)
                     # For baseline
@@ -418,11 +431,13 @@ class Evaluator(ABC):
                             model, test_dists, y_yield_test
                         )
                     else:
+                        print("Y YIELD TEST", y_yield_test)
                         (
                             processed_y_test,
                             processed_pred_rank,
                         ) = further_action_before_logging(model, X_test, y_yield_test)
-                    print(processed_y_test, processed_pred_rank)
+                    print("PROCESSED Y TEST", processed_y_test)
+                    print("PROCESSED PREDICTED RANK", processed_pred_rank)
                     self._evaluate_alg(
                         perf_dict,
                         processed_y_test,
@@ -533,7 +548,7 @@ class MulticlassEvaluator(Evaluator):
         self.feature_type = feature_type
         self.list_of_names = list_of_names
         self.list_of_algorithms = []
-        if type(self.dataset) in [dataloader.DeoxyDataset, dataloader.InformerDataset]:
+        if type(self.dataset) in [dataloader.DeoxyDataset, dataloader.InformerDataset, dataloader.ScienceDataset]:
             cv = 4
         elif type(self.dataset) == dataloader.NatureDataset:
             cv = 3
@@ -633,6 +648,9 @@ class MulticlassEvaluator(Evaluator):
         elif type(self.dataset) == dataloader.NatureDataset:
             y_test_reshape = y_yield_test.flatten()
             pred_rank_reshape = yield_to_ranking(pred_proba.flatten())
+        elif type(self.dataset) == dataloader.ScienceDataset :
+            y_test_reshape = y_yield_test
+            pred_rank_reshape = yield_to_ranking(pred_proba)
 
         return y_test_reshape, pred_rank_reshape
 
@@ -972,9 +990,12 @@ class LabelRankingEvaluator(Evaluator):
                 else:
                     y_test_reshape = y_yield_test.flatten()
                     pred_rank_reshape = model.predict(X_test).flatten()
-        elif type(self.dataset) == dataloader.NatureDataset:
+        elif type(self.dataset) == dataloader.NatureDataset :
             y_test_reshape = y_yield_test.flatten()
             pred_rank_reshape = model.predict(X_test).flatten()
+        elif type(self.dataset) == dataloader.ScienceDataset :
+            y_test_reshape = y_yield_test
+            pred_rank_reshape = model.predict(X_test)
         return y_test_reshape, pred_rank_reshape
 
     def train_and_evaluate_models(self):
@@ -1145,7 +1166,7 @@ class RegressorEvaluator(Evaluator):
             else:
                 y_test_reshape = y_test.flatten()
                 pred_rank_reshape = yield_to_ranking(model.predict(X_test).flatten())
-        elif type(self.dataset) == dataloader.NatureDataset:
+        elif type(self.dataset) in [dataloader.NatureDataset, dataloader.ScienceDataset] :
             print("ACTUAL Y", y_test)
             print("PREDICTED Y", model.predict(X_test))
             y_test_reshape = y_test

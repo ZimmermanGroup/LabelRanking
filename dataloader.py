@@ -1009,11 +1009,18 @@ class ScienceDataset(Dataset):
                 self.df = self.df.iloc[:192, :]
             elif self.component_to_rank == "whole_amine" :
                 self.df = self.df.iloc[192:, :]
-        self.smiles_list = [
-            x for x in self.df.iloc[:,0].values if str(x) != "nan"
-        ]
-        self.nan_ind = [i for i, x in enumerate(self.df.iloc[:,0].to_numpy()) if type(x)!=str]
+        self.df = self.df[(self.df.iloc[:, 1:] != 0).any(axis=1)]
+        self.smiles_list = []
+        self.nan_ind = []
+        for i, x in enumerate(self.df.iloc[:,0].values) :
+            if str(x) != "nan" and "R" not in str(x) :
+                self.smiles_list.append(x)
+            elif str(x) != "nan" and "R" in str(x) :
+                self.nan_ind.append(i)
+            else : 
+                self.nan_ind.append(i)
         self.n_rank_component = 4
+        self.train_together = False
 
     @property
     def X_fp(self, fpSize=1024, radius=3):
@@ -1031,13 +1038,18 @@ class ScienceDataset(Dataset):
         X_fp : np.ndarray of shape (n_rxns, n_features)
             n_features depends on self.for_regressor
         """
-        mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
+        mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=fpSize)
         self._X_fp = np.vstack(
             tuple([
                 mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(str(x))) 
                 for x in self.smiles_list
             ])
         )
+        if self.for_regressor :
+            self._X_fp = np.hstack((
+                np.repeat(self._X_fp, 4, axis=0),
+                np.tile(np.identity(4), [self._X_fp.shape[0], 1])
+            ))
         return self._X_fp
     
     @property
@@ -1045,7 +1057,7 @@ class ScienceDataset(Dataset):
         """Prepares continuous yield value array.
         Each column corresponds to Cu, Ir, Pd, Ru condition."""
         if len(self.nan_ind) > 0 :
-            self._y_yield = np.delete(self.df.iloc[:, 1:].to_numpy(), self.nan_ind[0], 0)
+            self._y_yield = np.delete(self.df.iloc[:, 1:].to_numpy(), self.nan_ind, 0)
         else :
             self._y_yield = self.df.iloc[:, 1:].to_numpy()
         return self._y_yield
@@ -1054,7 +1066,7 @@ class ScienceDataset(Dataset):
     def y_ranking(self):
         """Transforms raw continuous yield values into arrays of ranks."""
         if len(self.nan_ind) > 0 :
-            self._y_ranking = np.delete(yield_to_ranking(self.df.iloc[:, 1:].to_numpy()), self.nan_ind[0], 0)
+            self._y_ranking = np.delete(yield_to_ranking(self.df.iloc[:, 1:].to_numpy()), self.nan_ind, 0)
         else :
             self._y_ranking = yield_to_ranking(self.df.iloc[:, 1:].to_numpy())
         return self._y_ranking
@@ -1247,4 +1259,3 @@ class BorylationDataset(Dataset) :
         # Drop substrates that has no positives
 
         # Remove ligand 5 that also has relatively low rank + to keep balance with # of labels to data
-
