@@ -332,13 +332,24 @@ class Evaluator(ABC):
                             print("PROCESSED X TRAIN SHAPE", X_train.shape)
                     elif type(self) == MulticlassEvaluator:
                         y_train_missing = deepcopy(y_yield_train).astype(float)
-                        y_train_missing[inds_to_erase] = np.nan
+                        if type(self.dataset) != dataloader.ScienceDataset :
+                            y_train_missing[inds_to_erase] = np.nan
+                        else :
+                            y_train_missing[
+                                [x for x in range(y_train_missing.shape[0])], 
+                                [inds_to_erase[1][x] for x in train_ind]
+                            ] = np.nan
                         y_train = np.nanargmax(y_train_missing, axis=1)
                     # For label ranking
                     else:
-                        print("INDS TO ERASE", inds_to_erase)
                         y_train_missing = deepcopy(y_train).astype(float)
-                        y_train_missing[inds_to_erase] = np.nan
+                        if type(self.dataset) != dataloader.ScienceDataset :
+                            y_train_missing[inds_to_erase] = np.nan
+                        else :
+                            y_train_missing[
+                                [x for x in range(y_train_missing.shape[0])], 
+                                [inds_to_erase[1][x] for x in train_ind]
+                            ] = np.nan
                         if type(self) == LabelRankingEvaluator:
                             y_train = mstats.rankdata(
                                 np.ma.masked_invalid(y_train_missing), axis=1
