@@ -123,6 +123,20 @@ class NatureDataset(Dataset):
             self.validation_rows = joblib.load(
                 "datasets/natureHTE/nature_amide_inds_to_remove.joblib"
             )
+        elif self.component_to_rank == "thiol":
+            self.df = raw_data[raw_data["Chemistry"] == "Thiol"].reset_index()
+            self.validation_rows = []
+            rows_to_keep = []
+            # Removing rows that are all 0% yields + with multiple 100% yields
+            for i, row in enumerate(raw_data[raw_data["Chemistry"] == "Thiol"].iloc[:, -1].to_numpy().reshape(48, 4)) :
+                if len(np.where(row == 100)[0]) <= 1 and np.nansum(row) >0 :
+                    rows_to_keep.append(i)
+                else:
+                    self.validation_rows.append(i)
+            # Removing rows that bias toward a specific condition
+            further_remove = [23,21,9,6]
+            for a in further_remove:
+                self.validation_rows.append(rows_to_keep.pop(a))
         self.smiles_list = self.df["BB SMILES"].unique().tolist()
         self.cats = self.df["Catalyst"].unique().tolist()
         self.bases = self.df["Base"].unique().tolist()
