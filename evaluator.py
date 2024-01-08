@@ -290,6 +290,7 @@ class Evaluator(ABC):
         """
         for a, (train_ind, test_ind) in enumerate(cv.split()):
             y_train, y_test = y[train_ind], y[test_ind]
+            print("Y TRAIN, TEST SHAPE", y.shape, y_train.shape, y_test.shape)
             if X is not None:
                 X_train, X_test = X[train_ind, :], X[test_ind]
                 std = StandardScaler()
@@ -411,14 +412,16 @@ class Evaluator(ABC):
                             in [KNeighborsClassifier, IBLR_M, IBLR_PL]
                             # or type(model) in [IBLR_M, IBLR_PL]
                         ) and not self.dataset.train_together:
+                            print("GOING THRU HERE")
                             dist_array = self.dataset.X_dist
                             train_dists, test_dists = self._dist_array_train_test_split(
                                 dist_array, test_ind
                             )
                             model.fit(train_dists, y_train)
-                            if type(self.dataset) != dataloader.ScienceDataset :
+                            if type(self.dataset) not in [dataloader.ScienceDataset, dataloader.UllmannDataset] :
                                 test_dists = test_dists.reshape(1, -1)
                         else:
+                            print("Y TRAIN SHAPE", y_train.shape)
                             model.fit(X_train, y_train)
                     # For baseline
                     if y_yield is None:
@@ -429,12 +432,11 @@ class Evaluator(ABC):
                     # Nearest neighbors based models require different input from other algorithms.
                     elif (
                         type(model) == GridSearchCV
-                        # and type(model.estimator) == KNeighborsClassifier
                         and type(model.estimator)
                         in [KNeighborsClassifier, IBLR_M, IBLR_PL]
-                        # or type(model) in [IBLR_M, IBLR_PL]
                         # and not self.dataset.train_together
                     ):
+                        print("ALSO HERE")
                         (
                             processed_y_test,
                             processed_pred_rank,
@@ -559,7 +561,7 @@ class MulticlassEvaluator(Evaluator):
         self.feature_type = feature_type
         self.list_of_names = list_of_names
         self.list_of_algorithms = []
-        if type(self.dataset) in [dataloader.DeoxyDataset, dataloader.InformerDataset, dataloader.ScienceDataset]:
+        if type(self.dataset) in [dataloader.DeoxyDataset, dataloader.InformerDataset, dataloader.ScienceDataset, dataloader.UllmannDataset]:
             cv = 4
         elif type(self.dataset) == dataloader.NatureDataset:
             cv = 3
@@ -830,18 +832,28 @@ class MultilabelEvaluator(MulticlassEvaluator):
         else:
             # print(X_test)
             pred_proba = model.predict_proba(X_test)
-            # print(pred_proba)
-        if self.dataset.train_together:
-            pred_proba = np.hstack(
-                tuple(
-                    [
-                        x[:, 1].reshape(-1, 1)
-                        if x.shape[1] > 1
-                        else x.flatten().reshape(-1, 1)
-                        for x in pred_proba
-                    ]
-                )
-            )
+        print("PRED PROBA SHAPE", pred_proba)
+        if self.dataset.train_together or type(self.dataset) == dataloader.UllmannDataset:
+            arrays_to_stack = []
+            for proba_array in pred_proba :
+                if proba_array.shape[1] > 1 :
+                    arrays_to_stack.append(proba_array[:, 1].reshape(-1,1))
+                elif proba_array.shape[0] > 1 :
+                    arrays_to_stack.append(proba_array.flatten().reshape(-1,1))
+                else :
+                    assert len(proba_array.flatten()) == 1
+                    arrays_to_stack.append(np.repeat(proba_array, X_test.shape[0], axis=0))
+            pred_proba = np.hstack(tuple(arrays_to_stack))
+            # pred_proba = np.hstack(
+            #     tuple(
+            #         [
+            #             x[:, 1].reshape(-1, 1)
+            #             if x.shape[1] > 1
+            #             else x.flatten().reshape(-1, 1)
+            #             for x in pred_proba
+            #         ]
+            #     )
+            # )
             y_test_reshape = y_yield_test
         else:
             pred_proba = np.array(
@@ -928,45 +940,6 @@ class LabelRankingEvaluator(Evaluator):
         self.list_of_algorithms = list_of_algorithms
         self.list_of_names = list_of_names
 
-        # self.list_of_algorithms = []
-        # for name in self.list_of_names:
-        #     if name == "RPC":
-        #         self.list_of_algorithms.append(
-        #             RPC(
-        #                 base_learner=LogisticRegression(
-        #                     C=1, solver="liblinear", random_state=42
-        #                 )
-        #             )
-        #         )
-        #     elif name == "LRT":
-        #         self.list_of_algorithms.append(
-        #             DecisionTreeLabelRanker(
-        #                 random_state=42, min_samples_split=4 * 2  # might need to change
-        #             )
-        #         )
-        #     elif name == "LRRF":
-        #         self.list_of_algorithms.append(
-        #             # LabelRankingRandomForest(n_estimators=50)
-        #             GridSearchCV(
-        #                 LabelRankingRandomForest(),
-        #                 param_grid = {"n_estimators":[25,50,100], "max_depth":[4,6,8]},
-        #                 scoring=kt_score,
-        #                 cv=11
-        #             )
-        #         )
-        #     elif name == "IBM":
-        #         if self.dataset.train_together:
-        #             metric = "euclidean"
-        #         else:
-        #             metric = "precomputed"
-        #         self.list_of_algorithms.append(IBLR_M(n_neighbors=3, metric=metric))
-        #     elif name == "IBPL":
-        #         if self.dataset.train_together:
-        #             metric = "euclidean"
-        #         else:
-        #             metric = "precomputed"
-        #         self.list_of_algorithms.append(IBLR_PL(n_neighbors=3, metric=metric))
-
     def _processing_before_logging(self, model, X_test, y_yield_test):
         if type(self.dataset) == dataloader.DeoxyDataset:
             if self.dataset.component_to_rank == "base":
@@ -1004,8 +977,9 @@ class LabelRankingEvaluator(Evaluator):
         elif type(self.dataset) == dataloader.NatureDataset :
             y_test_reshape = y_yield_test.flatten()
             pred_rank_reshape = model.predict(X_test).flatten()
-        elif type(self.dataset) == dataloader.ScienceDataset :
+        elif type(self.dataset) in [dataloader.ScienceDataset, dataloader.UllmannDataset] :
             y_test_reshape = y_yield_test
+            print("X TEST SHAPE", X_test.shape)
             pred_rank_reshape = model.predict(X_test)
         return y_test_reshape, pred_rank_reshape
 
@@ -1182,6 +1156,11 @@ class RegressorEvaluator(Evaluator):
             print("PREDICTED Y", model.predict(X_test))
             y_test_reshape = y_test
             pred_rank_reshape = yield_to_ranking(model.predict(X_test))
+        elif type(self.dataset) == dataloader.UllmannDataset :
+            print("ACTUAL Y", y_test)
+            print("PREDICTED Y", model.predict(X_test))
+            y_test_reshape = y_test.reshape((len(y_test)//18, 18))
+            pred_rank_reshape = yield_to_ranking(model.predict(X_test).reshape((len(X_test)//18, 18)))
         return y_test_reshape, pred_rank_reshape
 
     def train_and_evaluate_models(self):
@@ -1210,6 +1189,7 @@ class RegressorEvaluator(Evaluator):
         # or one component is ranked but training together
         else:
             perf_dict = PERFORMANCE_DICT
+            print("y shape", y.shape)
             self._CV_loops(
                 perf_dict,
                 self.outer_cv,

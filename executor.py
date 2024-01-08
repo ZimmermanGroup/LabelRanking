@@ -290,118 +290,6 @@ def run_nature(parser):
     return perf_dicts
 
 
-def run_informer(parser):
-    """Runs model evaluations on the informer dataset as defined by the parser.
-
-    Parameters
-    ----------
-    parser: argparse object.
-
-    Returns
-    -------
-    perf_dicts : dict
-        key : model type
-        val : list of (or a single) performance dictionaries
-    """
-    # Initialization
-    label_component = parser.label_component[0]
-    if label_component == "amine_ratio":
-        n_rxns = 2
-        n_other_component = 4
-    elif label_component == "catalyst_ratio":
-        n_rxns = 4
-        n_other_component = 2  # may need to multiply by 5
-    if parser.n_missing_reaction > 0:
-        n_evals = N_EVALS
-    else:
-        n_evals = 1
-
-    lr_algorithms, classifiers = parse_algorithms(parser)
-    # Evaluations
-    perf_dicts = []
-    if parser.rfr:
-        if parser.train_together:
-            outer_ps = PredefinedSplit(np.repeat(np.arange(11), 40))
-            inner_ps = PredefinedSplit(
-                np.repeat(np.arange(10), 40 - parser.n_missing_reaction)
-            )
-
-        elif label_component == "amine_ratio":
-            outer_ps = [PredefinedSplit(np.repeat(np.arange(11), 10))] * 4
-            inner_ps = PredefinedSplit(
-                np.repeat(np.arange(10), 10 - parser.n_missing_reaction)
-            )
-
-        elif label_component == "catalyst_ratio":
-            outer_ps = [PredefinedSplit(np.repeat(np.arange(11), 20))] * 2
-            inner_ps = PredefinedSplit(
-                np.repeat(np.arange(10), 20 - parser.n_missing_reaction)
-            )
-
-        evaluator = RegressorEvaluator(
-            InformerDataset(True, label_component, parser.train_together, n_rxns),
-            parser.feature,
-            n_rxns,
-            [
-                GridSearchCV(
-                    RandomForestRegressor(random_state=42),
-                    param_grid={
-                        "n_estimators": [30, 100, 200],
-                        "max_depth": [5, 10, None],
-                    },
-                    scoring="r2",
-                    n_jobs=-1,
-                    cv=inner_ps,
-                )
-            ],
-            ["RFR"],
-            outer_ps,
-            parser.n_missing_reaction,
-            n_evals,
-        ).train_and_evaluate_models()
-        perf_dicts.append(evaluator.perf_dict)
-
-    if parser.baseline or len(lr_algorithms) > 0 or len(classifiers) > 0:
-        dataset = InformerDataset(False, label_component, parser.train_together, n_rxns)
-        if parser.train_together:
-            ps = PredefinedSplit(np.repeat(np.arange(11), n_other_component))
-        else:
-            ps = [PredefinedSplit(np.arange(11))] * n_other_component
-            inner_ps = PredefinedSplit(np.arange(10))
-        if parser.baseline:
-            baseline_evaluator = BaselineEvaluator(
-                dataset, n_rxns, ps, parser.n_missing_reaction, n_evals
-            ).train_and_evaluate_models()
-            perf_dicts.append(baseline_evaluator.perf_dict)
-        if len(lr_algorithms) > 0:
-            lr_algorithm_objs = lr_names_to_model_objs(lr_algorithms, inner_ps)
-            label_ranking_evaluator = LabelRankingEvaluator(
-                dataset,
-                parser.feature,
-                n_rxns,
-                lr_algorithms,
-                lr_algorithm_objs,
-                ps,
-                parser.n_missing_reaction,
-                n_evals,
-            ).train_and_evaluate_models()
-            perf_dicts.append(label_ranking_evaluator.perf_dict)
-        if len(classifiers) > 0:
-            if n_rxns > 1:
-                classifier_evaluator = MultilabelEvaluator(
-                    dataset,
-                    parser.feature,
-                    n_rxns,
-                    classifiers,
-                    ps,
-                    parser.n_missing_reaction,
-                    n_evals,
-                ).train_and_evaluate_models()
-            perf_dicts.append(classifier_evaluator.perf_dict)
-
-    return perf_dicts
-
-
 def run_deoxy(parser):
     """Runs model evaluations on the deoxyfluorination dataset as defined by the parser.
 
@@ -664,7 +552,7 @@ def parse_perf_dicts(parser, perf_dicts):
         for model in full_perf_df["model"].unique():
             print_perf_df(full_perf_df, model)
     if save:
-        if len(parser.label_component) == 1:
+        if len(parser.label_component) == 1 :
             comp = parser.label_component[0]
         elif len(parser.label_component) == 2:
             comp = "both"
@@ -678,6 +566,240 @@ def parse_perf_dicts(parser, perf_dicts):
             )
 
 
+def run_informer(parser):
+    """Runs model evaluations on the informer dataset as defined by the parser.
+
+    Parameters
+    ----------
+    parser: argparse object.
+
+    Returns
+    -------
+    perf_dicts : dict
+        key : model type
+        val : list of (or a single) performance dictionaries
+    """
+    # Initialization
+    label_component = parser.label_component[0]
+    if label_component == "amine_ratio":
+        n_rxns = 2
+        n_other_component = 4
+    elif label_component == "catalyst_ratio":
+        n_rxns = 4
+        n_other_component = 2  # may need to multiply by 5
+    if parser.n_missing_reaction > 0:
+        n_evals = N_EVALS
+    else:
+        n_evals = 1
+
+    lr_algorithms, classifiers = parse_algorithms(parser)
+    # Evaluations
+    perf_dicts = []
+    if parser.rfr:
+        if parser.train_together:
+            outer_ps = PredefinedSplit(np.repeat(np.arange(11), 40))
+            inner_ps = PredefinedSplit(
+                np.repeat(np.arange(10), 40 - parser.n_missing_reaction)
+            )
+
+        elif label_component == "amine_ratio":
+            outer_ps = [PredefinedSplit(np.repeat(np.arange(11), 10))] * 4
+            inner_ps = PredefinedSplit(
+                np.repeat(np.arange(10), 10 - parser.n_missing_reaction)
+            )
+
+        elif label_component == "catalyst_ratio":
+            outer_ps = [PredefinedSplit(np.repeat(np.arange(11), 20))] * 2
+            inner_ps = PredefinedSplit(
+                np.repeat(np.arange(10), 20 - parser.n_missing_reaction)
+            )
+
+        evaluator = RegressorEvaluator(
+            InformerDataset(True, label_component, parser.train_together, n_rxns),
+            parser.feature,
+            n_rxns,
+            [
+                GridSearchCV(
+                    RandomForestRegressor(random_state=42),
+                    param_grid={
+                        "n_estimators": [30, 100, 200],
+                        "max_depth": [5, 10, None],
+                    },
+                    scoring="r2",
+                    n_jobs=-1,
+                    cv=inner_ps,
+                )
+            ],
+            ["RFR"],
+            outer_ps,
+            parser.n_missing_reaction,
+            n_evals,
+        ).train_and_evaluate_models()
+        perf_dicts.append(evaluator.perf_dict)
+
+    if parser.baseline or len(lr_algorithms) > 0 or len(classifiers) > 0:
+        dataset = InformerDataset(False, label_component, parser.train_together, n_rxns)
+        if parser.train_together:
+            ps = PredefinedSplit(np.repeat(np.arange(11), n_other_component))
+        else:
+            ps = [PredefinedSplit(np.arange(11))] * n_other_component
+            inner_ps = PredefinedSplit(np.arange(10))
+        if parser.baseline:
+            baseline_evaluator = BaselineEvaluator(
+                dataset, n_rxns, ps, parser.n_missing_reaction, n_evals
+            ).train_and_evaluate_models()
+            perf_dicts.append(baseline_evaluator.perf_dict)
+        if len(lr_algorithms) > 0:
+            lr_algorithm_objs = lr_names_to_model_objs(lr_algorithms, inner_ps)
+            label_ranking_evaluator = LabelRankingEvaluator(
+                dataset,
+                parser.feature,
+                n_rxns,
+                lr_algorithms,
+                lr_algorithm_objs,
+                ps,
+                parser.n_missing_reaction,
+                n_evals,
+            ).train_and_evaluate_models()
+            perf_dicts.append(label_ranking_evaluator.perf_dict)
+        if len(classifiers) > 0:
+            if n_rxns > 1:
+                classifier_evaluator = MultilabelEvaluator(
+                    dataset,
+                    parser.feature,
+                    n_rxns,
+                    classifiers,
+                    ps,
+                    parser.n_missing_reaction,
+                    n_evals,
+                ).train_and_evaluate_models()
+            perf_dicts.append(classifier_evaluator.perf_dict)
+
+    return perf_dicts
+
+
+def run_ullmann(parser):
+    """ Runs model evaluations on the ullmann dataset as defined by the parser.
+    Parameters
+    ----------
+    parser: argparse object.
+
+    Returns
+    -------
+    perf_dicts : dict
+        key : model type
+        val : list of (or a single) performance dictionaries
+    """
+    # Initialization
+    n_rxns = 4
+    if parser.n_missing_reaction > 0:
+        n_evals = N_EVALS
+    else:
+        n_evals = 1
+    parser.label_component = [1] # dummy to keep consistent
+
+    lr_algorithms, classifiers = parse_algorithms(parser)
+    # Evaluations
+    perf_dicts = []
+    # Getting the splits to be used across all algorithms
+    ranking_dataset = UllmannDataset(False, n_rxns)
+    X = ranking_dataset.X_fp
+    top_condition = np.where(ranking_dataset.y_ranking == 1)[1]
+    skf = StratifiedKFold(n_splits=4, shuffle=True, random_state=42)
+    outer_ps_array = -1 * np.ones(X.shape[0])
+    for fold, (_, test) in enumerate(skf.split(X, top_condition)):
+        outer_ps_array[test] = fold
+    outer_ps = PredefinedSplit(outer_ps_array)
+        
+    if parser.rfr:
+        rfr_ps = PredefinedSplit(np.repeat(outer_ps_array, 18))
+        dataset = UllmannDataset(True, n_rxns)
+        evaluator = RegressorEvaluator(
+            dataset,
+            parser.feature,
+            n_rxns,
+            [
+                GridSearchCV(
+                    RandomForestRegressor(random_state=42),
+                    param_grid={
+                        "n_estimators": [30, 100, 200],
+                        "max_depth": [5, 10, None],
+                    },
+                    scoring="r2",
+                    n_jobs=-1,
+                    cv=4,
+                )
+            ],
+            ["RFR"],
+            rfr_ps,
+            parser.n_missing_reaction,
+            n_evals,
+        ).train_and_evaluate_models()
+        perf_dicts.append(evaluator.perf_dict)
+
+    if parser.baseline or len(lr_algorithms) > 0 or len(classifiers) > 0:
+        if parser.baseline:
+            baseline_evaluator = BaselineEvaluator(
+                ranking_dataset, n_rxns, outer_ps, parser.n_missing_reaction, n_evals
+            )
+            baseline_CV = baseline_evaluator.train_and_evaluate_models()
+            perf_dicts.append(baseline_CV.perf_dict)
+            
+        # TODO : not sure if the previous functions can handle multiple evaluation rxns.
+        if len(lr_algorithms) > 0:
+            lr_names = deepcopy(lr_algorithms)
+            lr_algorithms = lr_names_to_model_objs(lr_algorithms, 4)
+            label_ranking_evaluator = LabelRankingEvaluator(
+                ranking_dataset,
+                parser.feature,
+                n_rxns,
+                lr_names,
+                lr_algorithms,
+                outer_ps,
+                parser.n_missing_reaction,
+                n_evals,
+            )
+            label_ranking_CV = label_ranking_evaluator.train_and_evaluate_models()
+            perf_dicts.append(label_ranking_CV.perf_dict)
+            
+        if len(classifiers) > 0:
+            classifier_evaluator = MultilabelEvaluator(
+                ranking_dataset,
+                parser.feature,
+                n_rxns,
+                classifiers,
+                outer_ps,
+                parser.n_missing_reaction,
+                n_evals,
+            ).train_and_evaluate_models()
+            classifier_CV = classifier_evaluator.train_and_evaluate_models()
+            perf_dicts.append(classifier_CV.perf_dict)
+
+    return perf_dicts
+
+def run_borylation(parser):
+    """Runs model evaluations on the borylation dataset as defined by the parser.
+
+    Parameters
+    ----------
+    parser: argparse object.
+
+    Returns
+    -------
+    perf_dicts : dict
+        key : model type
+        val : list of (or a single) performance dictionaries
+    """
+    # Initialization
+    label_component = parser.label_component[0]
+    n_rxns = 3
+    if parser.n_missing_reaction > 0:
+        n_evals = N_EVALS
+    else:
+        n_evals = 1
+
+    lr_algorithms, classifiers = parse_algorithms(parser)
+
 def main(parser):
     if parser.dataset == "deoxy":
         perf_dicts = run_deoxy(parser)
@@ -687,6 +809,10 @@ def main(parser):
         perf_dicts = run_nature(parser)
     elif parser.dataset == "scienceMALDI":
         perf_dicts = run_maldi(parser)
+    elif parser.dataset == "ullmann":
+        perf_dicts = run_ullmann(parser)
+    elif parser.dataset == "borylation":
+        perf_dicts = run_borylation(parser)
     parse_perf_dicts(parser, perf_dicts)
 
 

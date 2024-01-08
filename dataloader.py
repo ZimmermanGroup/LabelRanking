@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from copy import deepcopy
 from rdkit import Chem, DataStructs
-from rdkit.Chem import rdFingerprintGenerator
+from rdkit.Chem import rdFingerprintGenerator, AllChem
 from sklearn.preprocessing import OneHotEncoder
 from abc import ABC
 import joblib
@@ -1109,6 +1109,23 @@ class UllmannDataset(Dataset):
         self.amine_desc = pd.read_excel("datasets/computed_data.xlsx", sheet_name="DFT_am")
         self.arbr_desc = pd.read_excel("datasets/computed_data.xlsx", sheet_name="DFT_arbr")
 
+        self.train_together = False
+        self.smiles_list = []
+        products_done = []
+
+        ullmann = AllChem.ReactionFromSmarts("[#6:1]Br.[#6:2]N>>[#6:2]N[#6:1]")
+        for i, row in self.rxn_df.iterrows():
+            prod, bromide, amine = row[:3]
+            if prod not in products_done and int(prod[-3:])< 200:
+                bromide_smiles = self.arbr_desc[self.arbr_desc["Compound_Name"]==bromide]["smiles"].values[0]
+                amine_smiles = self.amine_desc[self.amine_desc["Compound_Name"]==amine]["smiles"].values[0]
+                product_smiles = Chem.MolToSmiles(ullmann.RunReactants((
+                    Chem.MolFromSmiles(bromide_smiles), 
+                    Chem.MolFromSmiles(amine_smiles)
+                ))[0][0])
+                products_done.append(prod)
+                self.smiles_list.append(product_smiles)
+        print("SMILES LEN", len(self.smiles_list))
 
     @property
     def X_fp(self, fpSize=1024, radius=3):
@@ -1246,6 +1263,23 @@ class UllmannDataset(Dataset):
     def y_ranking(self):
         self._y_ranking = yield_to_ranking(self.y_yield)
         return self._y_ranking
+    
+    @property
+    def y_label(self):
+        yields = self.y_yield
+        labels = np.zeros_like(yields)
+        nth_highest_yield = np.partition(yields, -1 * self.n_rxns, axis=1)[
+            :, -1 * self.n_rxns
+        ]
+        labels[
+            yields
+            >= np.hstack(
+                tuple([nth_highest_yield.reshape(-1, 1)] * yields.shape[1])
+            )
+        ] = 1
+        assert np.all(np.sum(labels, axis=1) >= self.n_rxns)
+        self._y_label = labels
+        return self._y_label
 
 
 class BorylationDataset(Dataset) :
