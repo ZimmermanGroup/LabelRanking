@@ -29,9 +29,19 @@ def parse_args():
     )
     parser.add_argument(
         "--strategy",
-        choices=["condition_first", "lowest_diff", "two_condition_pairs", "all_conditions", 
-                 "random", "score_overlap", "highest_disagreement",
-                 "explore_rfr", "exploit_rfr", "full_rfr", "full_rpc"],
+        choices=[
+            "condition_first",
+            "lowest_diff",
+            "two_condition_pairs",
+            "all_conditions",
+            "random",
+            "score_overlap",
+            "highest_disagreement",
+            "explore_rfr",
+            "exploit_rfr",
+            "full_rfr",
+            "full_rpc",
+        ],
         help="Which AL acquisition strategy to use.",
     )
     parser.add_argument(
@@ -41,14 +51,14 @@ def parse_args():
     )
     parser.add_argument(
         "--substrate_selection",
-        choices=["farthest","quantile","skip_one"],
-        help="How to select the substrates for the condition-first and two-condition-pair strategies."
+        choices=["farthest", "quantile", "skip_one"],
+        help="How to select the substrates for the condition-first and two-condition-pair strategies.",
     )
     parser.add_argument(
         "--ensemble",
         default="parameters",
         choices=["parameters", "mask"],
-        help="How to prepare an ensemble of RPC models."
+        help="How to prepare an ensemble of RPC models.",
     )
     parser.add_argument(
         "--n_initial_subs",
@@ -147,7 +157,7 @@ def get_train_test_inds(y_ranking, n_test_cases):
     """
     test_inds = []
     for i in range(n_test_cases):
-        if len(np.where(y_ranking[:, i] == 1)[0]) > n_test_cases :
+        if len(np.where(y_ranking[:, i] == 1)[0]) > n_test_cases:
             test_inds.extend(
                 list(
                     np.random.choice(
@@ -229,24 +239,26 @@ def initial_substrate_selection(
 
 
 def lr_indices_to_rfr_indices(list_of_lr_indices, n_conditions=4):
-    """ Transforms a list of indices prepared for label ranking algorithms to
+    """Transforms a list of indices prepared for label ranking algorithms to
     that for regressors.
-    
+
     Parameters
     ----------
     list_of_lr_indices : list of inds
         Indices selected for label ranking algorithms.
     n_conditions : int
         Number of reaction conditions considered as labels.
-    
+
     Returns
     -------
     list_of_rfr_indices : list of inds
         Indices for RF regressors.
     """
     list_of_rfr_indices = []
-    for ind in list_of_lr_indices :
-        list_of_rfr_indices.extend([n_conditions * ind + x for x in range(n_conditions)])
+    for ind in list_of_lr_indices:
+        list_of_rfr_indices.extend(
+            [n_conditions * ind + x for x in range(n_conditions)]
+        )
     return list_of_rfr_indices
 
 
@@ -285,22 +297,24 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
             train_inds_list.append(train_inds)
             test_inds_list.append(test_inds)
             n_evals = parser.n_evals
-        else : #  conduct 
+        else:  #  conduct
             top_class = np.where(y_ranking == 1)[1]
             inds = np.arange(len(top_class))
-            train_inds, test_inds = train_test_split(inds, test_size=0.5, random_state=42+n_iter, stratify=top_class)
+            train_inds, test_inds = train_test_split(
+                inds, test_size=0.5, random_state=42 + n_iter, stratify=top_class
+            )
             train_inds_list.append(train_inds)
             test_inds_list.append(test_inds)
             train_inds_list.append(test_inds)
             test_inds_list.append(train_inds)
             n_evals = 2 * parser.n_evals
-    
+
     for n_iter in tqdm(range(n_evals)):  # Train test splits
         train_inds = train_inds_list[n_iter]
         test_inds = test_inds_list[n_iter]
         train_smiles = [x for i, x in enumerate(smiles_list) if i in train_inds]
 
-        if "rfr" not in parser.strategy :
+        if "rfr" not in parser.strategy:
             X_test = X[test_inds]
             y_test = y_ranking[test_inds]
             y_test_yield = y_yield[test_inds]
@@ -326,16 +340,16 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
             if parser.strategy != "random":
                 n_init = 1
             else:
-                if parser.dataset == "amine" :
+                if parser.dataset == "amine":
                     n_init = parser.n_evals
-                else :
+                else:
                     n_init = 2
 
         if parser.strategy not in ["full_rpc", "full_rfr"]:
             initial_inds_list = []
             rem_inds_list = []
             # To separate the random process from random selection in the loop below
-            for n in range(n_init) :
+            for n in range(n_init):
                 initial_inds, rem_inds = initial_substrate_selection(
                     parser.initialization,
                     train_inds,
@@ -392,7 +406,7 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                                 parser.n_subs_to_sample,
                                 parser.n_conds_to_sample,
                                 train_smiles,
-                                parser.substrate_selection
+                                parser.substrate_selection,
                             )
                         elif parser.strategy == "two_condition_pairs":
                             (
@@ -408,7 +422,7 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                                 parser.n_subs_to_sample,
                                 parser.n_conds_to_sample,
                                 train_smiles,
-                                parser.substrate_selection
+                                parser.substrate_selection,
                             )
                         elif parser.strategy == "random":
                             (
@@ -422,24 +436,36 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                                 parser.n_subs_to_sample,
                                 parser.n_conds_to_sample,
                             )
-                        elif parser.strategy in ["score_overlap", "highest_disagreement"] :
+                        elif parser.strategy in [
+                            "score_overlap",
+                            "highest_disagreement",
+                        ]:
                             rpc_ensemble = []
                             if parser.ensemble == "parameters":
-                                C = [0.1,0.3,1,3]
+                                C = [0.1, 0.3, 1, 3]
                                 penalty = ["l1", "l2"]
-                                for c_val, penalty_val in product(C, penalty) :
+                                for c_val, penalty_val in product(C, penalty):
                                     rpc = RPC(C=c_val, penalty=penalty_val)
                                     rpc.fit(X_sampled, y_sampled)
                                     rpc_ensemble.append(rpc)
                             elif parser.ensemble == "mask":
-                                for mask_num in range(20) : # Prepare 20 different masked X's
+                                for mask_num in range(
+                                    20
+                                ):  # Prepare 20 different masked X's
                                     list_of_inds_to_mask = (
-                                        np.random.choice(parser.n_initial_subs, int(parser.n_initial_subs//2), replace=False), 
-                                        np.random.choice(y_ranking.shape[1], int(parser.n_initial_subs//2))
+                                        np.random.choice(
+                                            parser.n_initial_subs,
+                                            int(parser.n_initial_subs // 2),
+                                            replace=False,
+                                        ),
+                                        np.random.choice(
+                                            y_ranking.shape[1],
+                                            int(parser.n_initial_subs // 2),
+                                        ),
                                     )
                                     masked_y = deepcopy(y_sampled).astype(float)
                                     masked_y[list_of_inds_to_mask] = np.nan
-                                    if mask_num == 0 : 
+                                    if mask_num == 0:
                                         print("Full sampled y")
                                         print(y_sampled)
                                         print("Masked y")
@@ -449,8 +475,13 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                                     rpc.fit(X_sampled, masked_y)
                                     rpc_ensemble.append(rpc)
 
-                            pred_proba_ensemble = [x.predict_proba(X[rem_inds]) for x in rpc_ensemble]
-                            proba_ensemble = [np.sum(x.predict_proba(X[rem_inds]), axis=2) for x in rpc_ensemble]
+                            pred_proba_ensemble = [
+                                x.predict_proba(X[rem_inds]) for x in rpc_ensemble
+                            ]
+                            proba_ensemble = [
+                                np.sum(x.predict_proba(X[rem_inds]), axis=2)
+                                for x in rpc_ensemble
+                            ]
                             score_array = np.stack(tuple(proba_ensemble), axis=2)
 
                             if parser.strategy == "score_overlap":
@@ -466,7 +497,7 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                                     parser.n_subs_to_sample,
                                     parser.n_conds_to_sample,
                                 )
-                            elif parser.strategy == "highest_disagreement" :
+                            elif parser.strategy == "highest_disagreement":
                                 (
                                     X_acquired,
                                     y_ranking_acquired,
@@ -494,7 +525,7 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                                 parser.n_subs_to_sample,
                                 parser.n_conds_to_sample,
                                 train_smiles,
-                                parser.substrate_selection
+                                parser.substrate_selection,
                             )
                         X_sampled = np.vstack((X_sampled, X_acquired))
                         y_sampled = np.vstack((y_sampled, y_ranking_acquired))
@@ -503,12 +534,12 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                         ]
                         rpc.fit(X_sampled, y_sampled)
                         y_pred = rpc.predict(X_test)
-                        if len(rem_inds) > 0 :
+                        if len(rem_inds) > 0:
                             rem_proba_array = rpc.predict_proba(X[rem_inds])
-                    if n_init > 1 and parser.n_evals == 1 :
+                    if n_init > 1 and parser.n_evals == 1:
                         rem_inds = deepcopy(copied_rem_inds)
-                
-                else :
+
+                else:
                     rfr_initial_inds = lr_indices_to_rfr_indices(initial_inds)
                     rfr_rem_inds = lr_indices_to_rfr_indices(rem_inds)
                     X_sampled = X[rfr_initial_inds]
@@ -529,17 +560,21 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                     gcv.fit(X_sampled, y_sampled)
                     initial_rfr = gcv.best_estimator_
                     y_pred = yield_to_ranking(
-                        initial_rfr.predict(X_test).reshape(len(test_inds), y_ranking.shape[1])
+                        initial_rfr.predict(X_test).reshape(
+                            len(test_inds), y_ranking.shape[1]
+                        )
                     )
-                    if parser.strategy == "explore_rfr" :
-                        rem_yield_array = np.zeros((len(rfr_rem_inds), len(initial_rfr.estimators_)))
-                        for i, tree in enumerate(initial_rfr.estimators_) :
+                    if parser.strategy == "explore_rfr":
+                        rem_yield_array = np.zeros(
+                            (len(rfr_rem_inds), len(initial_rfr.estimators_))
+                        )
+                        for i, tree in enumerate(initial_rfr.estimators_):
                             rem_yield_array[:, i] = tree.predict(X[rfr_rem_inds])
                     elif parser.strategy == "exploit_rfr":
                         rem_yield_array = initial_rfr.predict(X[rfr_rem_inds])
 
                     count = len(initial_inds)
-                    while len(rfr_rem_inds) > 66 : # Need to fix for other datasets
+                    while len(rfr_rem_inds) > 66:  # Need to fix for other datasets
                         rr_score = rr(y_test_yield, y_test, y_pred)
                         kt_score = kt(y_test, y_pred)
                         update_perf_dict(
@@ -549,7 +584,7 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                             (
                                 X_acquired,
                                 y_yield_acquired,
-                                next_rxn_inds
+                                next_rxn_inds,
                             ) = iteration_of_explore_rfr(
                                 X,
                                 y_yield,
@@ -557,11 +592,11 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                                 rem_yield_array,
                                 parser.n_subs_to_sample * parser.n_conds_to_sample,
                             )
-                        elif parser.strategy == "exploit_rfr" :
+                        elif parser.strategy == "exploit_rfr":
                             (
                                 X_acquired,
                                 y_yield_acquired,
-                                next_rxn_inds
+                                next_rxn_inds,
                             ) = iteration_of_exploit_rfr(
                                 X,
                                 y_yield,
@@ -576,16 +611,20 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
                         ]
                         # print(f"{count} Sampled")
                         # print(f"{len(rfr_rem_inds)} remaining reaction candidates")
-                        # for ind in next_rxn_inds : 
+                        # for ind in next_rxn_inds :
                         #     print(f"Sampled substrate {ind //4}, condition {ind %4}")
                         # print()
                         gcv.fit(X_sampled, y_sampled)
                         y_pred = yield_to_ranking(
-                            gcv.predict(X_test).reshape(len(test_inds), y_ranking.shape[1])
+                            gcv.predict(X_test).reshape(
+                                len(test_inds), y_ranking.shape[1]
+                            )
                         )
-                        if parser.strategy == "explore_rfr" :
-                            rem_yield_array = np.zeros((len(rfr_rem_inds), len(initial_rfr.estimators_)))
-                            for i, tree in enumerate(initial_rfr.estimators_) :
+                        if parser.strategy == "explore_rfr":
+                            rem_yield_array = np.zeros(
+                                (len(rfr_rem_inds), len(initial_rfr.estimators_))
+                            )
+                            for i, tree in enumerate(initial_rfr.estimators_):
                                 rem_yield_array[:, i] = tree.predict(X[rfr_rem_inds])
                         elif parser.strategy == "exploit_rfr":
                             rem_yield_array = initial_rfr.predict(X[rfr_rem_inds])
@@ -647,16 +686,18 @@ def AL_loops(parser, X, y_ranking, y_yield, smiles_list):
 
 def main(parser):
     # array preparation
-    if parser.dataset == "amine"  :
+    if parser.dataset == "amine":
         dataset = NatureDataset(False, parser.dataset, 1)
         smiles_list = [
-            x for i, x in enumerate(dataset.smiles_list) if i not in dataset.validation_rows
+            x
+            for i, x in enumerate(dataset.smiles_list)
+            if i not in dataset.validation_rows
         ]
     else:
         dataset = ScienceDataset(False, parser.dataset, 1)
         smiles_list = dataset.smiles_list
 
-    if "rfr" in parser.strategy :
+    if "rfr" in parser.strategy:
         # Please note that we do not consider training a regressor for any of the Science datasets.
         regressor_dataset = NatureDataset(True, parser.dataset, 1)
         X = regressor_dataset.X_fp
@@ -672,25 +713,22 @@ def main(parser):
     if parser.save:
         filename = f"performance_excels/AL/{parser.dataset}_{parser.n_initial_subs}_{parser.n_conds_to_sample}_{parser.n_subs_to_sample}_{parser.n_test_subs}.xlsx"
         if parser.substrate_selection == None or parser.strategy == "random":
-            if parser.strategy in ["score_overlap", "highest_disagreement"] :
+            if parser.strategy in ["score_overlap", "highest_disagreement"]:
                 sheetname = f"{parser.strategy.split('_')[1]}_{parser.ensemble}_{parser.initialization}"
-            else :
+            else:
                 sheetname = f"{parser.strategy}_{parser.initialization}"
-        else :
+        else:
             if parser.strategy == "two_condition_pairs":
                 strategyname = "two_condition"
-            else :
+            else:
                 strategyname = parser.strategy
             sheetname = f"{strategyname}_{parser.substrate_selection[:5]}_{parser.initialization}"
         if os.path.exists(filename):
             with pd.ExcelWriter(filename, mode="a") as writer:
-                perf_df.to_excel(
-                    writer, sheet_name=sheetname
-                )
+                perf_df.to_excel(writer, sheet_name=sheetname)
         else:
-            perf_df.to_excel(
-                filename, sheet_name=sheetname
-            )
+            perf_df.to_excel(filename, sheet_name=sheetname)
+
 
 if __name__ == "__main__":
     parser = parse_args()
