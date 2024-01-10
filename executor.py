@@ -2,7 +2,7 @@ import argparse
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, PredefinedSplit, StratifiedKFold
 from sklr.tree import DecisionTreeLabelRanker
-
+import os
 from dataloader import *
 from evaluator import *
 import warnings
@@ -442,7 +442,7 @@ def run_maldi(parser):
     for fold, (_, test) in enumerate(skf.split(X, top_condition)):
         outer_ps[test] = fold
     outer_ps = PredefinedSplit(outer_ps)
-        
+
     if parser.rfr:
         dataset = ScienceDataset(True, label_component, n_rxns)
         evaluator = RegressorEvaluator(
@@ -475,7 +475,7 @@ def run_maldi(parser):
             )
             baseline_CV = baseline_evaluator.train_and_evaluate_models()
             perf_dicts.append(baseline_CV.perf_dict)
-            
+
         # TODO : not sure if the previous functions can handle multiple evaluation rxns.
         if len(lr_algorithms) > 0:
             lr_names = deepcopy(lr_algorithms)
@@ -492,7 +492,7 @@ def run_maldi(parser):
             )
             label_ranking_CV = label_ranking_evaluator.train_and_evaluate_models()
             perf_dicts.append(label_ranking_CV.perf_dict)
-            
+
         if len(classifiers) > 0:
             classifier_evaluator = MulticlassEvaluator(
                 ranking_dataset,
@@ -552,7 +552,9 @@ def parse_perf_dicts(parser, perf_dicts):
         for model in full_perf_df["model"].unique():
             print_perf_df(full_perf_df, model)
     if save:
-        if len(parser.label_component) == 1 :
+        if not os.path.exists(f"performance_excels/{parser.dataset}"):
+            os.mkdir(f"performance_excels/{parser.dataset}")
+        if len(parser.label_component) == 1:
             comp = parser.label_component[0]
         elif len(parser.label_component) == 2:
             comp = "both"
@@ -679,7 +681,7 @@ def run_informer(parser):
 
 
 def run_ullmann(parser):
-    """ Runs model evaluations on the ullmann dataset as defined by the parser.
+    """Runs model evaluations on the ullmann dataset as defined by the parser.
     Parameters
     ----------
     parser: argparse object.
@@ -696,7 +698,7 @@ def run_ullmann(parser):
         n_evals = N_EVALS
     else:
         n_evals = 1
-    parser.label_component = [1] # dummy to keep consistent
+    parser.label_component = [1]  # dummy to keep consistent
 
     lr_algorithms, classifiers = parse_algorithms(parser)
     # Evaluations
@@ -710,7 +712,7 @@ def run_ullmann(parser):
     for fold, (_, test) in enumerate(skf.split(X, top_condition)):
         outer_ps_array[test] = fold
     outer_ps = PredefinedSplit(outer_ps_array)
-        
+
     if parser.rfr:
         rfr_ps = PredefinedSplit(np.repeat(outer_ps_array, 18))
         dataset = UllmannDataset(True, n_rxns)
@@ -744,8 +746,7 @@ def run_ullmann(parser):
             )
             baseline_CV = baseline_evaluator.train_and_evaluate_models()
             perf_dicts.append(baseline_CV.perf_dict)
-            
-        # TODO : not sure if the previous functions can handle multiple evaluation rxns.
+
         if len(lr_algorithms) > 0:
             lr_names = deepcopy(lr_algorithms)
             lr_algorithms = lr_names_to_model_objs(lr_algorithms, 4)
@@ -761,7 +762,7 @@ def run_ullmann(parser):
             )
             label_ranking_CV = label_ranking_evaluator.train_and_evaluate_models()
             perf_dicts.append(label_ranking_CV.perf_dict)
-            
+
         if len(classifiers) > 0:
             classifier_evaluator = MultilabelEvaluator(
                 ranking_dataset,
@@ -777,6 +778,7 @@ def run_ullmann(parser):
 
     return perf_dicts
 
+
 def run_borylation(parser):
     """Runs model evaluations on the borylation dataset as defined by the parser.
 
@@ -791,7 +793,7 @@ def run_borylation(parser):
         val : list of (or a single) performance dictionaries
     """
     # Initialization
-    label_component = parser.label_component[0]
+    parser.label_component = [1]  # dummy to keep consistent
     n_rxns = 3
     if parser.n_missing_reaction > 0:
         n_evals = N_EVALS
@@ -799,6 +801,83 @@ def run_borylation(parser):
         n_evals = 1
 
     lr_algorithms, classifiers = parse_algorithms(parser)
+    # Evaluations
+    perf_dicts = []
+    # Getting the splits to be used across all algorithms
+    ranking_dataset = BorylationDataset(False, n_rxns)
+    X = ranking_dataset.X_fp
+    top_condition = np.where(ranking_dataset.y_ranking == 1)[1]
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    outer_ps_array = -1 * np.ones(X.shape[0])
+    for fold, (_, test) in enumerate(skf.split(X, top_condition)):
+        outer_ps_array[test] = fold
+    outer_ps = PredefinedSplit(outer_ps_array)
+
+    if parser.rfr:
+        rfr_ps = PredefinedSplit(np.repeat(outer_ps_array, 12))
+        dataset = BorylationDataset(True, n_rxns)
+        evaluator = RegressorEvaluator(
+            dataset,
+            parser.feature,
+            n_rxns,
+            [
+                GridSearchCV(
+                    RandomForestRegressor(random_state=42),
+                    param_grid={
+                        "n_estimators": [30, 100, 200],
+                        "max_depth": [5, 10, None],
+                    },
+                    scoring="r2",
+                    n_jobs=-1,
+                    cv=4,
+                )
+            ],
+            ["RFR"],
+            rfr_ps,
+            parser.n_missing_reaction,
+            n_evals,
+        ).train_and_evaluate_models()
+        perf_dicts.append(evaluator.perf_dict)
+
+    if parser.baseline or len(lr_algorithms) > 0 or len(classifiers) > 0:
+        if parser.baseline:
+            baseline_evaluator = BaselineEvaluator(
+                ranking_dataset, n_rxns, outer_ps, parser.n_missing_reaction, n_evals
+            )
+            baseline_CV = baseline_evaluator.train_and_evaluate_models()
+            perf_dicts.append(baseline_CV.perf_dict)
+
+        if len(lr_algorithms) > 0:
+            lr_names = deepcopy(lr_algorithms)
+            lr_algorithms = lr_names_to_model_objs(lr_algorithms, 4)
+            label_ranking_evaluator = LabelRankingEvaluator(
+                ranking_dataset,
+                parser.feature,
+                n_rxns,
+                lr_names,
+                lr_algorithms,
+                outer_ps,
+                parser.n_missing_reaction,
+                n_evals,
+            )
+            label_ranking_CV = label_ranking_evaluator.train_and_evaluate_models()
+            perf_dicts.append(label_ranking_CV.perf_dict)
+
+        if len(classifiers) > 0:
+            classifier_evaluator = MultilabelEvaluator(
+                ranking_dataset,
+                parser.feature,
+                n_rxns,
+                classifiers,
+                outer_ps,
+                parser.n_missing_reaction,
+                n_evals,
+            ).train_and_evaluate_models()
+            classifier_CV = classifier_evaluator.train_and_evaluate_models()
+            perf_dicts.append(classifier_CV.perf_dict)
+
+    return perf_dicts
+
 
 def main(parser):
     if parser.dataset == "deoxy":

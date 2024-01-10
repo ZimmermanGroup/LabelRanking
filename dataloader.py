@@ -128,13 +128,18 @@ class NatureDataset(Dataset):
             self.validation_rows = []
             rows_to_keep = []
             # Removing rows that are all 0% yields + with multiple 100% yields
-            for i, row in enumerate(raw_data[raw_data["Chemistry"] == "Thiol"].iloc[:, -1].to_numpy().reshape(48, 4)) :
-                if len(np.where(row == 100)[0]) <= 1 and np.nansum(row) >0 :
+            for i, row in enumerate(
+                raw_data[raw_data["Chemistry"] == "Thiol"]
+                .iloc[:, -1]
+                .to_numpy()
+                .reshape(48, 4)
+            ):
+                if len(np.where(row == 100)[0]) <= 1 and np.nansum(row) > 0:
                     rows_to_keep.append(i)
                 else:
                     self.validation_rows.append(i)
             # Removing rows that bias toward a specific condition
-            further_remove = [23,21,9,6]
+            further_remove = [23, 21, 9, 6]
             for a in further_remove:
                 self.validation_rows.append(rows_to_keep.pop(a))
         self.smiles_list = self.df["BB SMILES"].unique().tolist()
@@ -1011,27 +1016,39 @@ class ScienceDataset(Dataset):
         if self.component_to_rank == "fragment":
             self.df = pd.read_excel(
                 "datasets/science_dark/science_dark.xlsx",
-                usecols=["calc_Smiles", "Cu normalized MALDI response (MALDI prod/ MALDI IS)", "Ir normalized MALDI response (MALDI prod/ MALDI IS)", "Pd normalized MALDI response (MALDI prod/ MALDI IS)", "Ru normalized MALDI response (MALDI prod/ MALDI IS)"]
+                usecols=[
+                    "calc_Smiles",
+                    "Cu normalized MALDI response (MALDI prod/ MALDI IS)",
+                    "Ir normalized MALDI response (MALDI prod/ MALDI IS)",
+                    "Pd normalized MALDI response (MALDI prod/ MALDI IS)",
+                    "Ru normalized MALDI response (MALDI prod/ MALDI IS)",
+                ],
             )
-        else :
+        else:
             self.df = pd.read_excel(
                 "datasets/science_dark/science_dark.xlsx",
-                sheet_name = "Tab S2. Whole molecule data",
-                usecols=["Canonical_Smiles", "Cu TWC Product Area%", "Ir TWC Product Area%", "Pd TWC Product Area%", "Ru TWC Product Area%"]
+                sheet_name="Tab S2. Whole molecule data",
+                usecols=[
+                    "Canonical_Smiles",
+                    "Cu TWC Product Area%",
+                    "Ir TWC Product Area%",
+                    "Pd TWC Product Area%",
+                    "Ru TWC Product Area%",
+                ],
             )
             if self.component_to_rank == "whole_bromide":
                 self.df = self.df.iloc[:192, :]
-            elif self.component_to_rank == "whole_amine" :
+            elif self.component_to_rank == "whole_amine":
                 self.df = self.df.iloc[192:, :]
         self.df = self.df[(self.df.iloc[:, 1:] != 0).any(axis=1)]
         self.smiles_list = []
         self.nan_ind = []
-        for i, x in enumerate(self.df.iloc[:,0].values) :
-            if str(x) != "nan" and "R" not in str(x) :
+        for i, x in enumerate(self.df.iloc[:, 0].values):
+            if str(x) != "nan" and "R" not in str(x):
                 self.smiles_list.append(x)
-            elif str(x) != "nan" and "R" in str(x) :
+            elif str(x) != "nan" and "R" in str(x):
                 self.nan_ind.append(i)
-            else : 
+            else:
                 self.nan_ind.append(i)
         self.n_rank_component = 4
         self.train_together = False
@@ -1054,40 +1071,46 @@ class ScienceDataset(Dataset):
         """
         mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=fpSize)
         self._X_fp = np.vstack(
-            tuple([
-                mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(str(x))) 
-                for x in self.smiles_list
-            ])
+            tuple(
+                [
+                    mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(str(x)))
+                    for x in self.smiles_list
+                ]
+            )
         )
-        if self.for_regressor :
-            self._X_fp = np.hstack((
-                np.repeat(self._X_fp, 4, axis=0),
-                np.tile(np.identity(4), [self._X_fp.shape[0], 1])
-            ))
+        if self.for_regressor:
+            self._X_fp = np.hstack(
+                (
+                    np.repeat(self._X_fp, 4, axis=0),
+                    np.tile(np.identity(4), [self._X_fp.shape[0], 1]),
+                )
+            )
         return self._X_fp
-    
+
     @property
     def y_yield(self):
         """Prepares continuous yield value array.
         Each column corresponds to Cu, Ir, Pd, Ru condition."""
-        if len(self.nan_ind) > 0 :
+        if len(self.nan_ind) > 0:
             self._y_yield = np.delete(self.df.iloc[:, 1:].to_numpy(), self.nan_ind, 0)
-        else :
+        else:
             self._y_yield = self.df.iloc[:, 1:].to_numpy()
         return self._y_yield
-    
+
     @property
     def y_ranking(self):
         """Transforms raw continuous yield values into arrays of ranks."""
-        if len(self.nan_ind) > 0 :
-            self._y_ranking = np.delete(yield_to_ranking(self.df.iloc[:, 1:].to_numpy()), self.nan_ind, 0)
-        else :
+        if len(self.nan_ind) > 0:
+            self._y_ranking = np.delete(
+                yield_to_ranking(self.df.iloc[:, 1:].to_numpy()), self.nan_ind, 0
+            )
+        else:
             self._y_ranking = yield_to_ranking(self.df.iloc[:, 1:].to_numpy())
         return self._y_ranking
-    
+
 
 class UllmannDataset(Dataset):
-    """ Prepares Ullmann coupling dataset prepared by Sigman. 2023
+    """Prepares Ullmann coupling dataset prepared by Sigman. 2023
     Considers only Ligands 19~36
 
     Parameters
@@ -1098,34 +1121,51 @@ class UllmannDataset(Dataset):
         Number of reactions that we simulate to select and conduct.
     component_to_rank : str {'amine', 'amide', 'sulfonamide'}
         Which substrate dataset type to use.
-        Although 'substrate_to_rank' is a better name, using this for consistency. 
+        Although 'substrate_to_rank' is a better name, using this for consistency.
     """
+
     def __init__(self, for_regressor, n_rxns):
         super().__init__(for_regressor, n_rxns)
-        
+
         # Reading in the raw dataset
-        self.rxn_df = pd.read_excel("datasets/computed_data.xlsx", sheet_name="expt_data")
-        self.ligand_desc = pd.read_excel("datasets/computed_data.xlsx", sheet_name="DFT_lig")
-        self.amine_desc = pd.read_excel("datasets/computed_data.xlsx", sheet_name="DFT_am")
-        self.arbr_desc = pd.read_excel("datasets/computed_data.xlsx", sheet_name="DFT_arbr")
+        self.rxn_df = pd.read_excel(
+            "datasets/computed_data.xlsx", sheet_name="expt_data"
+        )
+        self.ligand_desc = pd.read_excel(
+            "datasets/computed_data.xlsx", sheet_name="DFT_lig"
+        )
+        self.amine_desc = pd.read_excel(
+            "datasets/computed_data.xlsx", sheet_name="DFT_am"
+        )
+        self.arbr_desc = pd.read_excel(
+            "datasets/computed_data.xlsx", sheet_name="DFT_arbr"
+        )
 
         self.train_together = False
         self.smiles_list = []
         products_done = []
+        self.n_conds = 18
 
         ullmann = AllChem.ReactionFromSmarts("[#6:1]Br.[#6:2]N>>[#6:2]N[#6:1]")
         for i, row in self.rxn_df.iterrows():
             prod, bromide, amine = row[:3]
-            if prod not in products_done and int(prod[-3:])< 200:
-                bromide_smiles = self.arbr_desc[self.arbr_desc["Compound_Name"]==bromide]["smiles"].values[0]
-                amine_smiles = self.amine_desc[self.amine_desc["Compound_Name"]==amine]["smiles"].values[0]
-                product_smiles = Chem.MolToSmiles(ullmann.RunReactants((
-                    Chem.MolFromSmiles(bromide_smiles), 
-                    Chem.MolFromSmiles(amine_smiles)
-                ))[0][0])
+            if prod not in products_done and int(prod[-3:]) < 200:
+                bromide_smiles = self.arbr_desc[
+                    self.arbr_desc["Compound_Name"] == bromide
+                ]["smiles"].values[0]
+                amine_smiles = self.amine_desc[
+                    self.amine_desc["Compound_Name"] == amine
+                ]["smiles"].values[0]
+                product_smiles = Chem.MolToSmiles(
+                    ullmann.RunReactants(
+                        (
+                            Chem.MolFromSmiles(bromide_smiles),
+                            Chem.MolFromSmiles(amine_smiles),
+                        )
+                    )[0][0]
+                )
                 products_done.append(prod)
                 self.smiles_list.append(product_smiles)
-        print("SMILES LEN", len(self.smiles_list))
 
     @property
     def X_fp(self, fpSize=1024, radius=3):
@@ -1147,114 +1187,149 @@ class UllmannDataset(Dataset):
         """
         mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=fpSize)
         arbr_lookup = {
-            row["Compound_Name"]:mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(row["smiles"])) 
+            row["Compound_Name"]: mfpgen.GetCountFingerprintAsNumPy(
+                Chem.MolFromSmiles(row["smiles"])
+            )
             for _, row in self.arbr_desc.iterrows()
         }
         amine_lookup = {
-            row["Compound_Name"]:mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(row["smiles"])) 
+            row["Compound_Name"]: mfpgen.GetCountFingerprintAsNumPy(
+                Chem.MolFromSmiles(row["smiles"])
+            )
             for _, row in self.amine_desc.iterrows()
         }
         ligand_lookup = {
-            row["Compound_Name"]:mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(row["smiles"])) 
+            row["Compound_Name"]: mfpgen.GetCountFingerprintAsNumPy(
+                Chem.MolFromSmiles(row["smiles"])
+            )
             for _, row in self.ligand_desc.iterrows()
         }
         fp_rows = []
         prods = []
         for i, row in self.rxn_df.iterrows():
-            if int(row["Product"][1:]) < 200 and row["Ligands"][-2] != "_" and int(row["Ligands"][-2:]) >= 19 :
-                if self.for_regressor :
+            if (
+                int(row["Product"][1:]) < 200
+                and row["Ligands"][-2] != "_"
+                and int(row["Ligands"][-2:]) >= 19
+            ):
+                if self.for_regressor:
                     fp_rows.append(
-                        np.concatenate((
-                            arbr_lookup[row["Aryl_Bromide"]],
-                            amine_lookup[row["Amine"]],
-                            ligand_lookup[row["Ligands"]]
-                        )).reshape(1,-1)
-                    )
-                else :
-                    if row["Product"] not in prods :
-                        fp_rows.append(
-                            np.concatenate((
+                        np.concatenate(
+                            (
                                 arbr_lookup[row["Aryl_Bromide"]],
-                                amine_lookup[row["Amine"]]
-                            )).reshape(1,-1)
+                                amine_lookup[row["Amine"]],
+                                ligand_lookup[row["Ligands"]],
+                            )
+                        ).reshape(1, -1)
+                    )
+                else:
+                    if row["Product"] not in prods:
+                        fp_rows.append(
+                            np.concatenate(
+                                (
+                                    arbr_lookup[row["Aryl_Bromide"]],
+                                    amine_lookup[row["Amine"]],
+                                )
+                            ).reshape(1, -1)
                         )
-                        prods.append(row["Product"])                        
+                        prods.append(row["Product"])
         self._X_fp = np.vstack(tuple(fp_rows))
         return self._X_fp
-    
 
     @property
     def X_desc(self):
-        """ Prepares array of descriptors as prepared by the authors."""
+        """Prepares array of descriptors as prepared by the authors."""
         arbr_lookup = {
-            row["Compound_Name"]:row.iloc[2:].to_numpy().flatten()
+            row["Compound_Name"]: row.iloc[2:].to_numpy().flatten()
             for _, row in self.arbr_desc.iterrows()
         }
         amine_lookup = {
-            row["Compound_Name"]:row.iloc[2:].to_numpy().flatten()
+            row["Compound_Name"]: row.iloc[2:].to_numpy().flatten()
             for _, row in self.amine_desc.iterrows()
         }
         ligand_lookup = {
-            row["Compound_Name"]:row.iloc[2:].to_numpy().flatten()
+            row["Compound_Name"]: row.iloc[2:].to_numpy().flatten()
             for _, row in self.ligand_desc.iterrows()
         }
         desc_rows = []
         prods = []
         for i, row in self.rxn_df.iterrows():
-            if int(row["Product"][1:]) < 200 and row["Ligands"][-2] != "_" and int(row["Ligands"][-2:]) >= 19 :
-                if self.for_regressor :
+            if (
+                int(row["Product"][1:]) < 200
+                and row["Ligands"][-2] != "_"
+                and int(row["Ligands"][-2:]) >= 19
+            ):
+                if self.for_regressor:
                     desc_rows.append(
-                        np.concatenate((
-                            arbr_lookup[row["Aryl_Bromide"]],
-                            amine_lookup[row["Amine"]],
-                            ligand_lookup[row["Ligands"]]
-                        )).reshape(1,-1)
-                    )
-                else :
-                    if row["Product"] not in prods :
-                        desc_rows.append(
-                            np.concatenate((
+                        np.concatenate(
+                            (
                                 arbr_lookup[row["Aryl_Bromide"]],
-                                amine_lookup[row["Amine"]]
-                            )).reshape(1,-1)
+                                amine_lookup[row["Amine"]],
+                                ligand_lookup[row["Ligands"]],
+                            )
+                        ).reshape(1, -1)
+                    )
+                else:
+                    if row["Product"] not in prods:
+                        desc_rows.append(
+                            np.concatenate(
+                                (
+                                    arbr_lookup[row["Aryl_Bromide"]],
+                                    amine_lookup[row["Amine"]],
+                                )
+                            ).reshape(1, -1)
                         )
                         prods.append(row["Product"])
         self._X_desc = np.vstack(tuple(desc_rows))
         return self._X_desc
-    
+
     @property
     def X_onehot(self):
         "Prepares onehot arrays."
         prod_list = []
         onehot_rows = []
-        for i, row in self.rxn_df.iterrows(): 
-            if int(row["Product"][1:]) < 200 and row["Ligands"][-2] != "_" and int(row["Ligands"][-2:]) >= 19 :
-                if self.for_regressor :
+        for i, row in self.rxn_df.iterrows():
+            if (
+                int(row["Product"][1:]) < 200
+                and row["Ligands"][-2] != "_"
+                and int(row["Ligands"][-2:]) >= 19
+            ):
+                if self.for_regressor:
                     onehot_rows.append(row[1:-1])
-                else :
-                    if row["Product"] not in prod_list :
+                else:
+                    if row["Product"] not in prod_list:
                         onehot_rows.append(row[1:3])
                         prod_list.append(row["Product"])
         ohe = OneHotEncoder(handle_unknown="ignore")
         self._X_onehot = ohe.fit_transform(onehot_rows)
         self._ohe = ohe
         return self._X_onehot
-    
+
     @property
     def y_yield(self):
-        if self.for_regressor : 
+        if self.for_regressor:
             y_list = []
-            for i, row in self.rxn_df.iterrows(): 
-                if int(row["Product"][1:]) < 200 and row["Ligands"][-2] != "_" and int(row["Ligands"][-2:]) >= 19 :
+            for i, row in self.rxn_df.iterrows():
+                if (
+                    int(row["Product"][1:]) < 200
+                    and row["Ligands"][-2] != "_"
+                    and int(row["Ligands"][-2:]) >= 19
+                ):
                     y_list.append(row["Yield"])
             self._y_yield = np.array(y_list)
-        else :
+        else:
             all_prods = self.rxn_df["Product"].unique()
-            prods = [x for x in all_prods if int(x[1:])< 200]
-            y_array = -1 * np.ones((len(prods), 18)) # 18 : L19 ~ L36
-            for i, row in self.rxn_df.iterrows(): 
-                if int(row["Product"][1:]) < 200 and row["Ligands"][-2] != "_" and int(row["Ligands"][-2:]) >= 19 :
-                    y_array[prods.index(row["Product"]), int(row["Ligands"][-2:])-19] = row["Yield"]
+            prods = [x for x in all_prods if int(x[1:]) < 200]
+            y_array = -1 * np.ones((len(prods), 18))  # 18 : L19 ~ L36
+            for i, row in self.rxn_df.iterrows():
+                if (
+                    int(row["Product"][1:]) < 200
+                    and row["Ligands"][-2] != "_"
+                    and int(row["Ligands"][-2:]) >= 19
+                ):
+                    y_array[
+                        prods.index(row["Product"]), int(row["Ligands"][-2:]) - 19
+                    ] = row["Yield"]
             y_array[y_array < 0] = np.nan
             self._y_yield = y_array
         return self._y_yield
@@ -1263,7 +1338,7 @@ class UllmannDataset(Dataset):
     def y_ranking(self):
         self._y_ranking = yield_to_ranking(self.y_yield)
         return self._y_ranking
-    
+
     @property
     def y_label(self):
         yields = self.y_yield
@@ -1273,18 +1348,16 @@ class UllmannDataset(Dataset):
         ]
         labels[
             yields
-            >= np.hstack(
-                tuple([nth_highest_yield.reshape(-1, 1)] * yields.shape[1])
-            )
+            >= np.hstack(tuple([nth_highest_yield.reshape(-1, 1)] * yields.shape[1]))
         ] = 1
         assert np.all(np.sum(labels, axis=1) >= self.n_rxns)
         self._y_label = labels
         return self._y_label
 
 
-class BorylationDataset(Dataset) :
-    """ Prepares borylation dataset prepared by Schneider, 2023
-    
+class BorylationDataset(Dataset):
+    """Prepares borylation dataset prepared by Schneider, 2023
+
     Parameters
     ----------
     for_regressor : bool
@@ -1293,17 +1366,117 @@ class BorylationDataset(Dataset) :
         Number of reactions that we simulate to select and conduct.
     component_to_rank : str {'amine', 'amide', 'sulfonamide'}
         Which substrate dataset type to use.
-        Although 'substrate_to_rank' is a better name, using this for consistency. 
+        Although 'substrate_to_rank' is a better name, using this for consistency.
     """
+
     def __init__(self, for_regressor, n_rxns):
         super().__init__(for_regressor, n_rxns)
-        
-        # Reading in the raw dataset
-        self.rxn_df = pd.read_csv("datasets/borylation.csv", usecols=[1, 9, 13, 16])
 
+        # Reading in the raw dataset
+        entire_df = pd.read_csv(
+            "datasets/borylation/borylation.csv", usecols=[1, 9, 13, 16]
+        )
         # Drop reactions involving acetonitrile as they are obviously bad-performing.
         # Almost never within the top-6  choices
-
-        # Drop substrates that has no positives
-
         # Remove ligand 5 that also has relatively low rank + to keep balance with # of labels to data
+        partial_df = entire_df[entire_df["solvent"] != "N#CC"][
+            entire_df["ligand"] != "N1=CC=CC2=CC=CC(N)=C12"
+        ][entire_df["ligand"] != "N=1C=CC=CC1C=NN(CC=2C=CC=CC2)CC=3C=CC=CC3"]
+        partial_df = partial_df[
+            partial_df["educt"] != "O=C(C=1C=CC=CC1)N(C(C)C)C(C)C"
+        ]  # one datapoint missing
+        # Drop substrates that has at least three positives
+        self.smiles_list = []
+        for educt in partial_df["educt"].unique():
+            if (
+                len(
+                    np.where(
+                        partial_df[partial_df["educt"] == educt].iloc[:, -1].to_numpy()
+                        > 0
+                    )[0]
+                )
+                > 2
+            ):
+                self.smiles_list.append(educt)
+        self.df = partial_df[partial_df["educt"].isin(self.smiles_list)]
+        self.train_together = False
+        self.n_conds = 12
+
+    @property
+    def X_fp(self, fpSize=1024, radius=3):
+        """
+        Prepares fingerprint arrays of substrates.
+        For regressors, one-hot of ligand and solvent descriptors are appended after the substrate fingerprint.
+
+        Parameters
+        ----------
+        fpSize : int
+            Length of the Morgan FP.
+        radius : int
+            Radius of the Morgan FP.
+
+        Returns
+        -------
+        X_fp : np.ndarray of shape (n_rxns, n_features)
+            n_features depends on self.for_regressor
+        """
+        mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=fpSize)
+        ligand_list = list(self.df["ligand"].unique())
+        solvent_desc = pd.read_excel("datasets/borylation/solvents.xlsx")
+        if self.for_regressor:
+            fp_arrays = []
+            for i, row in self.df.iterrows():
+                fp_array = mfpgen.GetCountFingerprintAsNumPy(
+                    Chem.MolFromSmiles(row["educt"])
+                ).reshape(1, -1)
+                ligand_onehot = np.zeros((1, 4))
+                ligand_onehot[0, ligand_list.index(row[1])] = 1
+                solv_desc = (
+                    solvent_desc[solvent_desc["solvent"] == row[2]]
+                    .values[0][1:]
+                    .reshape(1, -1)
+                )
+                fp_arrays.append(np.hstack((fp_array, ligand_onehot, solv_desc)))
+        else:
+            fp_arrays = [
+                mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromSmiles(x))
+                for x in self.smiles_list
+            ]
+        self._X_fp = np.vstack(tuple(fp_arrays))
+        return self._X_fp
+
+    @property
+    def X_onehot(self):
+        "Prepares onehot arrays."
+        ohe = OneHotEncoder(handle_unknown="ignore")
+        self._X_onehot = ohe.fit_transform(self.df.iloc[:, :3])
+        self._ohe = ohe
+        return self._X_onehot
+
+    @property
+    def y_yield(self):
+        if self.for_regressor:
+            self._y_yield = self.df["mono_bo"].to_numpy()
+        else:
+            self._y_yield = self.df["mono_bo"].to_numpy().reshape(15, 12)
+        return self._y_yield
+
+    @property
+    def y_ranking(self):
+        self._y_ranking = yield_to_ranking(self.y_yield)
+        return self._y_ranking
+
+    @property
+    def y_label(self):
+        yields = self.y_yield
+        labels = np.zeros_like(yields)
+        nth_highest_yield = np.partition(yields, -1 * self.n_rxns, axis=1)[
+            :, -1 * self.n_rxns
+        ]
+        labels[
+            yields
+            >= np.hstack(tuple([nth_highest_yield.reshape(-1, 1)] * yields.shape[1]))
+        ] = 1
+        assert np.all(np.sum(labels, axis=1) >= self.n_rxns)
+        self._y_label = labels
+        return self._y_label
