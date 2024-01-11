@@ -7,6 +7,7 @@ from sklearn.preprocessing import OneHotEncoder
 from abc import ABC
 import joblib
 
+np.random.seed(42)
 
 def yield_to_ranking(yield_array):
     """Transforms an array of yield values to their rankings.
@@ -1057,6 +1058,7 @@ class ScienceDataset(Dataset):
     def X_fp(self, fpSize=1024, radius=3):
         """
         Prepares fingerprint arrays of substrates.
+
         Parameters
         ----------
         fpSize : int
@@ -1086,7 +1088,30 @@ class ScienceDataset(Dataset):
                 )
             )
         return self._X_fp
+    
+    @property
+    def X_random(self, fpSize=1024, radius=3):
+        """ Prepares a randomly mixed fingerprint array of substrates.
+        
+        Parameters
+        ----------
+        fpSize : int
+            Length of the Morgan FP.
+        radius : int
+            Radius of the Morgan FP.
 
+        Returns
+        -------
+        X_random : np.ndarray of shape (n_rxns, n_features)
+        """
+        original_fp_array = deepcopy(self.X_fp)
+        shuffled_rows = []
+        for row in original_fp_array :
+            np.random.shuffle(row)
+            shuffled_rows.append(row)
+        return np.vstack(tuple(shuffled_rows))
+
+        
     @property
     def y_yield(self):
         """Prepares continuous yield value array.

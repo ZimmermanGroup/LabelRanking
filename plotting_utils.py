@@ -559,6 +559,10 @@ def critical_difference_diagram(
 
     .. [2] https://mirkobunse.github.io/CriticalDifferenceDiagrams.jl/stable/
     """
+    import cycler, matplotlib
+    color = pyplot.cm.viridis(np.linspace(0, 1, 9))
+    matplotlib.rcParams['axes.prop_cycle'] = cycler.cycler('color', color)
+
     elbow_props = elbow_props or {}
     marker_props = {"zorder": 3, **(marker_props or {})}
     label_props = {"va": "center", **(label_props or {})}
@@ -574,6 +578,7 @@ def critical_difference_diagram(
     ax.spines["right"].set_visible(False)
     ax.spines["left"].set_visible(False)
     ax.spines["bottom"].set_visible(False)
+    ax.tick_params(axis="x", labelsize=5)
     ax.xaxis.set_ticks_position("top")
     ax.spines["top"].set_position("zero")
 

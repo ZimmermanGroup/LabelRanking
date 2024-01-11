@@ -476,7 +476,6 @@ def run_maldi(parser):
             baseline_CV = baseline_evaluator.train_and_evaluate_models()
             perf_dicts.append(baseline_CV.perf_dict)
 
-        # TODO : not sure if the previous functions can handle multiple evaluation rxns.
         if len(lr_algorithms) > 0:
             lr_names = deepcopy(lr_algorithms)
             lr_algorithms = lr_names_to_model_objs(lr_algorithms, 4)
@@ -566,7 +565,6 @@ def parse_perf_dicts(parser, perf_dicts):
             full_perf_df.to_excel(
                 f"performance_excels/{parser.dataset}/{parser.feature}_{comp}_{parser.train_together}_rem{parser.n_missing_reaction}rxns.xlsx"
             )
-
 
 def run_informer(parser):
     """Runs model evaluations on the informer dataset as defined by the parser.

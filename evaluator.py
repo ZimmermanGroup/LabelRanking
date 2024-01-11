@@ -426,7 +426,6 @@ class Evaluator(ABC):
                             in [KNeighborsClassifier, IBLR_M, IBLR_PL]
                             # or type(model) in [IBLR_M, IBLR_PL]
                         ) and not self.dataset.train_together:
-                            print("GOING THRU HERE")
                             dist_array = self.dataset.X_dist
                             train_dists, test_dists = self._dist_array_train_test_split(
                                 dist_array, test_ind
@@ -454,7 +453,6 @@ class Evaluator(ABC):
                         in [KNeighborsClassifier, IBLR_M, IBLR_PL]
                         # and not self.dataset.train_together
                     ):
-                        print("ALSO HERE")
                         (
                             processed_y_test,
                             processed_pred_rank,
