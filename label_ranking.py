@@ -22,7 +22,10 @@ def kendall_tau(y_true, y_pred):
     kt = kendalltau(y_true, y_pred).statistic
     return kt
 
+def rr_func(y_rank, y_pred_rank):
+    return np.mean(np.reciprocal(y_rank[np.argmin(y_pred_rank, axis=1)]))
 
+rr_score = make_scorer(rr_func)
 kt_score = make_scorer(kendall_tau, greater_is_better=True)
 
 

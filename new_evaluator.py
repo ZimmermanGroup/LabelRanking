@@ -500,14 +500,9 @@ class BaselineEvaluator(Evaluator):
 
     def train_and_evaluate_models(self):
         y = self.dataset.y_yield
-        # print("TRAIN Y SHAPE", y.shape)
-        # print("LENGTH Y", len(y))
         if type(self.outer_cv) == list:
-            # print("LIST CV")
             self.perf_dict = []
             for i, (array, cv) in enumerate(zip(y, self.outer_cv)):
-                # print(i, array[:3, :])
-                # print(i, cv)
                 perf_dict = deepcopy(PERFORMANCE_DICT)
                 self._CV_loops(
                     perf_dict, cv, None, array, self._processing_before_logging
@@ -617,7 +612,7 @@ class MulticlassEvaluator(Evaluator):
                 self.list_of_algorithms.append(
                     GridSearchCV(
                         KNeighborsClassifier(metric=metric),
-                        param_grid={"n_neighbors": [2, 4, 6]},
+                        param_grid={"n_neighbors": [3,5,10]},
                         scoring="balanced_accuracy",
                         n_jobs=-1,
                         cv=cv,
@@ -936,20 +931,8 @@ class LabelRankingEvaluator(Evaluator):
 
     def _processing_before_logging(self, model, X_test, y_yield_test):
         if type(self.dataset) == dataloader.InformerDataset:
-            if self.dataset.component_to_rank == "amine_ratio":
-                if self.dataset.train_together:
-                    y_test_reshape = y_yield_test
-                    pred_rank_reshape = model.predict(X_test)
-                else:
-                    y_test_reshape = y_yield_test.flatten()
-                    pred_rank_reshape = model.predict(X_test).flatten()
-            elif self.dataset.component_to_rank == "catalyst_ratio":
-                if self.dataset.train_together:
-                    y_test_reshape = y_yield_test
-                    pred_rank_reshape = model.predict(X_test)
-                else:
-                    y_test_reshape = y_yield_test.flatten()
-                    pred_rank_reshape = model.predict(X_test).flatten()
+            y_test_reshape = y_yield_test.flatten()
+            pred_rank_reshape = model.predict(X_test).flatten()
         else :
             y_test_reshape = y_yield_test
             pred_rank_reshape = model.predict(X_test)

@@ -38,11 +38,6 @@ def parse_args():
         "--lrrf", action="store_true", help="Include Label Ranking RF as in Qiu, 2018"
     )
     parser.add_argument(
-        "--lrt",
-        action="store_true",
-        help="Include Label Ranking Tree as in Hüllermeier, 2008",
-    )
-    parser.add_argument(
         "--rpc",
         action="store_true",
         help="Include Pairwise label ranking as in Hüllermeier, 2008",
@@ -104,8 +99,6 @@ def parse_algorithms(parser, inner_ps=None):
     lr_algorithms = []
     if parser.rpc:
         lr_algorithms.append("RPC")
-    if parser.lrt:
-        lr_algorithms.append("LRT")
     if parser.lrrf:
         lr_algorithms.append("LRRF")
     if parser.ibm:
