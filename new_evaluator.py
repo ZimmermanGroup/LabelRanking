@@ -9,7 +9,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
-from sklr.tree import DecisionTreeLabelRanker
 
 PERFORMANCE_DICT = {
     "kendall_tau": [],
@@ -88,7 +87,6 @@ class Evaluator(ABC):
             perf_dict["regret"].extend(regret)
             if type(comp) == list:
                 perf_dict["test_compound"].extend(comp)
-            # elif type(comp) == int:
             else:
                 perf_dict["test_compound"].extend([comp] * len(kt))
             if type(model) == "list":
@@ -316,7 +314,7 @@ class Evaluator(ABC):
                 y_yield_test = y_yield[test_ind]
                 y_yield_train = y_yield[train_ind]
             print()
-            print("Compound", a)
+            print("CV FOLD", a)
             if self.n_rxns_to_erase >= 1:
                 list_of_inds_to_erase = self._random_selection_of_inds_to_erase()
             for eval_loop_num in range(self.n_evaluations):
@@ -391,6 +389,7 @@ class Evaluator(ABC):
                 for b, (model, model_name) in enumerate(
                     zip(self.list_of_algorithms, self.list_of_names)
                 ):
+                    ###### Model training phase ###### 
                     if X is not None:
                         # For multilabel LogReg
                         if (
@@ -430,15 +429,10 @@ class Evaluator(ABC):
                                 dist_array, test_ind
                             )
                             model.fit(train_dists, y_train)
-                            # if type(self.dataset) not in [
-                            #     dataloader.ScienceDataset,
-                            #     dataloader.UllmannDataset,
-                            #     dataloader.BorylationDataset,
-                            # ]:
-                            #     test_dists = test_dists.reshape(1, -1)
                         else:
                             print("Y TRAIN SHAPE", y_train.shape)
                             model.fit(X_train, y_train)
+                    ###### EVALUATION PHASE ###### 
                     # For baseline
                     if y_yield is None:
                         (
@@ -542,6 +536,7 @@ class BaselineEvaluator(Evaluator):
 
 class MulticlassEvaluator(Evaluator):
     """Evaluates multiclass classifiers.
+    Note that this doesn't process informer, ullmann and borylation datasets.
 
     Parameters
     ----------
@@ -647,46 +642,31 @@ class MulticlassEvaluator(Evaluator):
         new_pred_proba :
             Updated pred_proba array with all classes.
         """
-        new_pred_proba = []
-        for i in range(self.dataset.n_rank_component):
-            if i not in model.classes_:
-                new_pred_proba.append(0)
-            else:
-                new_pred_proba.append(pred_proba[0][list(model.classes_).index(i)])
-        return np.array(new_pred_proba)
+        if pred_proba.shape[0] == 1 :
+            new_pred_proba_list = []
+            for i in range(self.dataset.n_rank_component):
+                if i not in model.classes_:
+                    new_pred_proba.append(0)
+                else:
+                    new_pred_proba.append(pred_proba[0][list(model.classes_).index(i)])
+            new_pred_proba = np.array(new_pred_proba_list)
+        else :
+            allzero_column_idx = []
+            for i in range(self.dataset.n_rank_component):
+                if i not in model.classes_:
+                    allzero_column_idx.append(i)
+            new_pred_proba = np.insert(pred_proba, tuple(allzero_column_idx), 0, axis=1)
+                    
+        return new_pred_proba
 
     def _processing_before_logging(self, model, X_test, y_yield_test):
-        # Should simplify (is common with label ranking )
         pred_proba = model.predict_proba(X_test)
+        print("PRED PROBA", pred_proba)
         if len(pred_proba[0]) < self.dataset.n_rank_component:
             pred_proba = self._get_full_class_proba(pred_proba, model)
+        pred_rank_reshape = yield_to_ranking(pred_proba)
 
-        if type(self.dataset) in [dataloader.DeoxyDataset, dataloader.InformerDataset]:
-            if self.dataset.component_to_rank == "base":
-                if self.dataset.train_together:
-                    y_test_reshape = y_yield_test.reshape(4, 5).T
-                    pred_rank_reshape = yield_to_ranking(pred_proba.reshape(4, 5).T)
-                else:
-                    y_test_reshape = y_yield_test.flatten()
-                    pred_rank_reshape = yield_to_ranking(pred_proba.flatten())
-            elif self.dataset.component_to_rank == "sulfonyl_fluoride":
-                if self.dataset.train_together:
-                    y_test_reshape = y_yield_test.reshape(4, 5)
-                    pred_rank_reshape = yield_to_ranking(pred_proba.reshape(4, 5))
-                else:
-                    y_test_reshape = y_yield_test.flatten()
-                    pred_rank_reshape = yield_to_ranking(pred_proba.flatten())
-            elif self.dataset.component_to_rank == "both":
-                y_test_reshape = y_yield_test
-                pred_rank_reshape = yield_to_ranking(pred_proba)
-        elif type(self.dataset) == dataloader.NatureDataset:
-            y_test_reshape = y_yield_test.flatten()
-            pred_rank_reshape = yield_to_ranking(pred_proba.flatten())
-        elif type(self.dataset) == dataloader.ScienceDataset:
-            y_test_reshape = y_yield_test
-            pred_rank_reshape = yield_to_ranking(pred_proba)
-
-        return y_test_reshape, pred_rank_reshape
+        return y_yield_test, pred_rank_reshape
 
     def train_and_evaluate_models(self):
         X = self._load_X()
@@ -876,8 +856,6 @@ class MultilabelEvaluator(MulticlassEvaluator):
                 [x[0][1] if len(x[0]) == 2 else 1 - x[0][0] for x in pred_proba]
             )
             y_test_reshape = y_yield_test.flatten()
-        # print(pred_proba.shape)
-        # print("Y YIELD TEST SHAPE", y_yield_test.shape)
         pred_rank_reshape = yield_to_ranking(pred_proba)
 
         return y_test_reshape, pred_rank_reshape
@@ -957,25 +935,7 @@ class LabelRankingEvaluator(Evaluator):
         self.list_of_names = list_of_names
 
     def _processing_before_logging(self, model, X_test, y_yield_test):
-        if type(self.dataset) == dataloader.DeoxyDataset:
-            if self.dataset.component_to_rank == "base":
-                if self.dataset.train_together:
-                    y_test_reshape = y_yield_test.reshape(4, 5).T
-                    pred_rank_reshape = model.predict(X_test).reshape(4, 5).T
-                else:
-                    y_test_reshape = y_yield_test.flatten()
-                    pred_rank_reshape = model.predict(X_test).flatten()
-            elif self.dataset.component_to_rank == "sulfonyl_fluoride":
-                if self.dataset.train_together:
-                    y_test_reshape = y_yield_test.reshape(4, 5)
-                    pred_rank_reshape = model.predict(X_test).reshape(4, 5)
-                else:
-                    y_test_reshape = y_yield_test.flatten()
-                    pred_rank_reshape = model.predict(X_test).flatten()
-            elif self.dataset.component_to_rank == "both":
-                y_test_reshape = y_yield_test
-                pred_rank_reshape = model.predict(X_test)
-        elif type(self.dataset) == dataloader.InformerDataset:
+        if type(self.dataset) == dataloader.InformerDataset:
             if self.dataset.component_to_rank == "amine_ratio":
                 if self.dataset.train_together:
                     y_test_reshape = y_yield_test
@@ -990,16 +950,8 @@ class LabelRankingEvaluator(Evaluator):
                 else:
                     y_test_reshape = y_yield_test.flatten()
                     pred_rank_reshape = model.predict(X_test).flatten()
-        elif type(self.dataset) == dataloader.NatureDataset:
-            y_test_reshape = y_yield_test.flatten()
-            pred_rank_reshape = model.predict(X_test).flatten()
-        elif type(self.dataset) in [
-            dataloader.ScienceDataset,
-            dataloader.UllmannDataset,
-            dataloader.BorylationDataset,
-        ]:
+        else :
             y_test_reshape = y_yield_test
-            print("X TEST SHAPE", X_test.shape)
             pred_rank_reshape = model.predict(X_test)
         return y_test_reshape, pred_rank_reshape
 
@@ -1106,98 +1058,33 @@ class RegressorEvaluator(Evaluator):
         self.list_of_names = list_of_names
 
     def _processing_before_logging(self, model, X_test, y_test):
-        if type(self.dataset) == dataloader.DeoxyDataset:
-            if self.dataset.train_together:
-                if self.dataset.component_to_rank == "base":
-                    y_test_reshape = y_test.reshape(4, 5).T
-                    pred_rank_reshape = yield_to_ranking(
-                        model.predict(X_test).reshape(4, 5).T
-                    )
-                elif self.dataset.component_to_rank == "sulfonyl_fluoride":
-                    y_test_reshape = y_test.reshape(4, 5)
-                    pred_rank_reshape = yield_to_ranking(
-                        model.predict(X_test).reshape(4, 5)
-                    )
-                elif self.dataset.component_to_rank == "both":
-                    y_test_reshape = y_test
-                    pred_rank_reshape = yield_to_ranking(model.predict(X_test))
-            else:
-                y_test_reshape = y_test.flatten()
-                pred_rank_reshape = yield_to_ranking(model.predict(X_test).flatten())
-        elif type(self.dataset) == dataloader.InformerDataset:
-            if self.dataset.train_together:
-                if self.dataset.component_to_rank == "amine_ratio":
-                    y_test_reshape = y_test.reshape(10, 4).T
-                    pred_rank_reshape = yield_to_ranking(
-                        model.predict(X_test).reshape(10, 4).T
-                    )
-                elif self.dataset.component_to_rank == "catalyst_ratio":
-                    intermediate_array = y_test.reshape(10, 4).T
-                    even_rows = [
-                        row.reshape(1, -1)
-                        for i, row in enumerate(intermediate_array)
-                        if i % 2 == 0
-                    ]
-                    odds_rows = [
-                        row.reshape(1, -1)
-                        for i, row in enumerate(intermediate_array)
-                        if i % 2 == 1
-                    ]
-                    y_test_reshape = np.vstack(
-                        (
-                            np.hstack(tuple(even_rows)),
-                            np.hstack(tuple(odds_rows)),
-                        )
-                    )
-                    pred_yields = model.predict(X_test).reshape(10, 4).T
-                    even_rows = [
-                        row.reshape(1, -1)
-                        for i, row in enumerate(pred_yields)
-                        if i % 2 == 0
-                    ]
-                    odds_rows = [
-                        row.reshape(1, -1)
-                        for i, row in enumerate(pred_yields)
-                        if i % 2 == 1
-                    ]
-                    pred_rank_reshape = yield_to_ranking(
-                        np.vstack(
-                            (
-                                np.hstack(tuple(even_rows)),
-                                np.hstack(tuple(odds_rows)),
-                            )
-                        )
-                    )
-            else:
-                y_test_reshape = y_test.flatten()
-                pred_rank_reshape = yield_to_ranking(model.predict(X_test).flatten())
-        elif type(self.dataset) in [
-            dataloader.NatureDataset,
-            dataloader.ScienceDataset,
-        ]:
-            y_test_reshape = y_test
-            pred_rank_reshape = yield_to_ranking(model.predict(X_test))
-        elif type(self.dataset) in [
+        if type(self.dataset) in [
             dataloader.UllmannDataset,
             dataloader.BorylationDataset,
+            dataloader.NatureDataset,
+            dataloader.ScienceDataset,
+            dataloader.DeoxyDataset
         ]:
-            n_conds = self.dataset.n_conds
+            n_conds = self.dataset.n_rank_component
             y_test_reshape = y_test.reshape((len(y_test) // n_conds, n_conds))
             pred_rank_reshape = yield_to_ranking(
                 model.predict(X_test).reshape((len(X_test) // n_conds, n_conds))
             )
+        elif type(self.dataset) == dataloader.InformerDataset:
+            y_test_reshape = y_test.flatten()
+            pred_rank_reshape = yield_to_ranking(model.predict(X_test).flatten())
         return y_test_reshape, pred_rank_reshape
 
     def train_and_evaluate_models(self):
         X = self._load_X()
         y = self.dataset.y_yield
-
+        
         self.models = [[] for _ in range(len(self.list_of_algorithms))]
         self.cv_scores = [[] for _ in range(len(self.list_of_algorithms))]
 
         if (
             type(self.outer_cv) == list
-        ):  # When one component is ranked but the dataset is separated by the other component
+        ):  # When one component is ranked but the dataset is separated by the other component (deoxy, informer)
             self.perf_dict = []
             for i, (array, cv) in enumerate(zip(y, self.outer_cv)):
                 perf_dict = deepcopy(PERFORMANCE_DICT)
@@ -1211,10 +1098,9 @@ class RegressorEvaluator(Evaluator):
                 )
                 self.perf_dict.append(perf_dict)
         # cases when both reaction components are ranked simultaneously
-        # or one component is ranked but training together
         else:
             perf_dict = PERFORMANCE_DICT
-            print("y shape", y.shape)
+            print("y shape", y.shape, X.shape)
             self._CV_loops(
                 perf_dict,
                 self.outer_cv,

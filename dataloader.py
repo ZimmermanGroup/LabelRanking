@@ -1120,6 +1120,8 @@ class ScienceDataset(Dataset):
             self._y_yield = np.delete(self.df.iloc[:, 1:].to_numpy(), self.nan_ind, 0)
         else:
             self._y_yield = self.df.iloc[:, 1:].to_numpy()
+        if self.for_regressor :
+            self._y_yield = self._y_yield.flatten()
         return self._y_yield
 
     @property
@@ -1169,7 +1171,7 @@ class UllmannDataset(Dataset):
         self.train_together = False
         self.smiles_list = []
         products_done = []
-        self.n_conds = 18
+        self.n_rank_component = 18
 
         ullmann = AllChem.ReactionFromSmarts("[#6:1]Br.[#6:2]N>>[#6:2]N[#6:1]")
         for i, row in self.rxn_df.iterrows():
@@ -1425,7 +1427,7 @@ class BorylationDataset(Dataset):
                 self.smiles_list.append(educt)
         self.df = partial_df[partial_df["educt"].isin(self.smiles_list)]
         self.train_together = False
-        self.n_conds = 12
+        self.n_rank_component = 12
 
     @property
     def X_fp(self, fpSize=1024, radius=3):

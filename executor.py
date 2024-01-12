@@ -125,6 +125,33 @@ def parse_algorithms(parser, inner_ps=None):
     return lr_algorithms, classifiers
 
 
+def prepare_stratified_kfold_by_top_condition(ranking_dataset, n_splits):
+    """ Prepares stratified kfold for cross validation by splitting by the top reaction condition.
+    
+    Parameters
+    ----------
+    dataset : dataloader.Dataset object.
+        Dataset to work on.
+    n_splits : int
+        Number of splits to make.
+
+    Returns
+    -------
+    fold_array : np.ndarray of shape (n_substrates)
+        Which test fold each substrate is alloted to. Used for modifying for regressor.
+    outer_ps : PredefinedSplit object
+        Predefined split to be used for evaluation.
+    """
+    X = ranking_dataset.X_fp
+    top_condition = np.where(ranking_dataset.y_ranking == 1)[1]
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    outer_ps_array = -1 * np.ones(X.shape[0])
+    for fold, (_, test) in enumerate(skf.split(X, top_condition)):
+        outer_ps_array[test] = fold
+    outer_ps = PredefinedSplit(outer_ps_array)
+    return outer_ps_array, outer_ps
+
+
 def lr_names_to_model_objs(lr_names, inner_ps):
     """Changes list of algorithm names into objects to train.
 
@@ -209,7 +236,6 @@ def run_nature(parser):
     if parser.rfr:
         dataset = NatureDataset(True, label_component, n_rxns)
         onehot_array = dataset.X_onehot
-        # print("ONEHOT SHAPE", dataset.X_onehot.shape[0])
         outer_ps = PredefinedSplit(
             np.repeat(np.arange(int(onehot_array.shape[0] // 4)), 4)
         )
@@ -435,15 +461,10 @@ def run_maldi(parser):
 
     # Getting the splits to be used across all algorithms
     ranking_dataset = ScienceDataset(False, label_component, n_rxns)
-    X = ranking_dataset.X_fp
-    top_condition = np.where(ranking_dataset.y_ranking == 1)[1]
-    skf = StratifiedKFold(n_splits=4, shuffle=True, random_state=42)
-    outer_ps = -1 * np.ones(X.shape[0])
-    for fold, (_, test) in enumerate(skf.split(X, top_condition)):
-        outer_ps[test] = fold
-    outer_ps = PredefinedSplit(outer_ps)
-
+    outer_ps_array, outer_ps = prepare_stratified_kfold_by_top_condition(ranking_dataset, 4)
+    
     if parser.rfr:
+        rfr_ps = PredefinedSplit(np.repeat(outer_ps_array, 4))
         dataset = ScienceDataset(True, label_component, n_rxns)
         evaluator = RegressorEvaluator(
             dataset,
@@ -462,7 +483,7 @@ def run_maldi(parser):
                 )
             ],
             ["RFR"],
-            outer_ps,
+            rfr_ps,
             parser.n_missing_reaction,
             n_evals,
         ).train_and_evaluate_models()
@@ -645,14 +666,8 @@ def run_ullmann(parser):
     perf_dicts = []
     # Getting the splits to be used across all algorithms
     ranking_dataset = UllmannDataset(False, n_rxns)
-    X = ranking_dataset.X_fp
-    top_condition = np.where(ranking_dataset.y_ranking == 1)[1]
-    skf = StratifiedKFold(n_splits=4, shuffle=True, random_state=42)
-    outer_ps_array = -1 * np.ones(X.shape[0])
-    for fold, (_, test) in enumerate(skf.split(X, top_condition)):
-        outer_ps_array[test] = fold
-    outer_ps = PredefinedSplit(outer_ps_array)
-
+    outer_ps_array, outer_ps = prepare_stratified_kfold_by_top_condition(ranking_dataset, 4)
+    
     if parser.rfr:
         rfr_ps = PredefinedSplit(np.repeat(outer_ps_array, 18))
         dataset = UllmannDataset(True, n_rxns)
@@ -745,13 +760,7 @@ def run_borylation(parser):
     perf_dicts = []
     # Getting the splits to be used across all algorithms
     ranking_dataset = BorylationDataset(False, n_rxns)
-    X = ranking_dataset.X_fp
-    top_condition = np.where(ranking_dataset.y_ranking == 1)[1]
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    outer_ps_array = -1 * np.ones(X.shape[0])
-    for fold, (_, test) in enumerate(skf.split(X, top_condition)):
-        outer_ps_array[test] = fold
-    outer_ps = PredefinedSplit(outer_ps_array)
+    outer_ps_array, outer_ps = prepare_stratified_kfold_by_top_condition(ranking_dataset, 5)
 
     if parser.rfr:
         rfr_ps = PredefinedSplit(np.repeat(outer_ps_array, 12))
