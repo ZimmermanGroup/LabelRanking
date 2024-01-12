@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from itertools import combinations
+from scipy.stats.mstats import rankdata
 
 
 def prep_performance_by_model_dict(perf_excel_path):
@@ -674,3 +674,51 @@ def critical_difference_diagram(
         "labels": labels,
         "crossbars": crossbars,
     }
+
+
+def plot_rr_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], vline_pos=[1,2,5], save=False):
+    """ Plots a heatmap of reciprocal ranks (RR) achieved by each algorithm in each dataset.
+    The annotated numbers are the RR values, while the colors denote the rank of each algorithm 
+    in each dataset.
+    
+    Parameters
+    ----------
+    rr_array : np.ndarray of shape (n_datasets, n_models)
+        Reciprocal rank values to plot.
+    model_list : list of str 
+        Names of algorithms.
+    dataset_list : list of str
+        Names of datasets.
+    save : False or str
+        Whether to save the resulting plot. If str, will be used as filename.
+    
+    Returns
+    -------
+    None
+    """
+    # Version 2 - color by rank in each dataset, annotate the RR values
+    # fig, ax = plt.subplots()
+    ordered_rr_rank_by_dataset = rankdata(rr_array, axis=1)
+    n_models = len(model_list)
+    cmap = sns.color_palette("viridis", n_models)
+    vmap = {i: 1+n_models-i for i in range(1,1+n_models)}
+    ax = sns.heatmap(ordered_rr_rank_by_dataset, cmap=cmap, annot=rr_array)
+    # get colorbar from seaborn heatmap
+    colorbar = ax.collections[0].colorbar
+    # define discrete intervals for colorbar
+    r = colorbar.vmax - colorbar.vmin
+    colorbar.set_ticks([colorbar.vmin + 0.5 * r / (n_models) + r * i / (n_models) for i in range(n_models)])
+    colorbar.set_ticklabels(list(vmap.values()))
+    colorbar.set_label("Model's rank", fontdict={"fontfamily":"arial", "fontsize":10})
+
+    for v in vline_pos :
+        ax.axvline(v,0,1, c="white", lw=0.5)
+    for h in hline_pos : 
+        ax.axhline(h,0,1, c="white", lw=0.5)
+    
+    ax.set_xticklabels(model_list, fontdict={"fontfamily":"arial", "fontsize":10})
+    ax.set_yticklabels(dataset_list, fontdict={"fontfamily":"arial", "fontsize":10}, rotation=0)
+    ax.set_xlabel("Models", fontdict={"fontfamily":"arial", "fontsize":12})
+    ax.set_ylabel("Datasets", fontdict={"fontfamily":"arial", "fontsize":12})
+    if type(save) == str:
+        plt.savefig(f"figures/{save}", dpi=300, format="svg")

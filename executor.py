@@ -508,64 +508,6 @@ def run_maldi(parser):
     return perf_dicts
 
 
-def parse_perf_dicts(parser, perf_dicts):
-    """
-    Process the performance dicts.
-
-    Parameters
-    ----------
-    save : bool
-        Whether the processed performance log should be saved.
-        if True : saves an excel file
-        if False : prints out average scores
-    perf_dicts : list of dictionaries or list of lists of dictionaries
-
-    Returns
-    -------
-    None
-    """
-
-    def print_perf_df(perf_df, model):
-        print(
-            model,
-            round(
-                perf_df[perf_df["model"] == model]["reciprocal_rank"].mean(),
-                3,
-            ),
-            round(perf_df[perf_df["model"] == model]["kendall_tau"].mean(), 3),
-            round(perf_df[perf_df["model"] == model]["regret"].mean(), 3),
-        )
-
-    save = parser.save
-    if type(perf_dicts[0]) == list:
-        full_perf_df = []
-        for i in range(len(perf_dicts[0])):
-            sub_perf_dict = pd.concat([pd.DataFrame(x[i]) for x in perf_dicts])
-            full_perf_df.append(sub_perf_dict)
-        for perf_df in full_perf_df:
-            for model in perf_df["model"].unique():
-                print_perf_df(perf_df, model)
-        full_perf_df = pd.concat(full_perf_df)
-    elif type(perf_dicts[0]) == dict:
-        full_perf_df = pd.concat([pd.DataFrame(x) for x in perf_dicts])
-        for model in full_perf_df["model"].unique():
-            print_perf_df(full_perf_df, model)
-    if save:
-        if not os.path.exists(f"performance_excels/{parser.dataset}"):
-            os.mkdir(f"performance_excels/{parser.dataset}")
-        if len(parser.label_component) == 1:
-            comp = parser.label_component[0]
-        elif len(parser.label_component) == 2:
-            comp = "both"
-        if parser.n_missing_reaction == 0:
-            full_perf_df.to_excel(
-                f"performance_excels/{parser.dataset}/{parser.feature}_{comp}_{parser.train_together}.xlsx"
-            )
-        else:
-            full_perf_df.to_excel(
-                f"performance_excels/{parser.dataset}/{parser.feature}_{comp}_{parser.train_together}_rem{parser.n_missing_reaction}rxns.xlsx"
-            )
-
 def run_informer(parser):
     """Runs model evaluations on the informer dataset as defined by the parser.
 
@@ -875,6 +817,65 @@ def run_borylation(parser):
             perf_dicts.append(classifier_CV.perf_dict)
 
     return perf_dicts
+
+
+def parse_perf_dicts(parser, perf_dicts):
+    """
+    Process the performance dicts.
+
+    Parameters
+    ----------
+    save : bool
+        Whether the processed performance log should be saved.
+        if True : saves an excel file
+        if False : prints out average scores
+    perf_dicts : list of dictionaries or list of lists of dictionaries
+
+    Returns
+    -------
+    None
+    """
+
+    def print_perf_df(perf_df, model):
+        print(
+            model,
+            round(
+                perf_df[perf_df["model"] == model]["reciprocal_rank"].mean(),
+                3,
+            ),
+            round(perf_df[perf_df["model"] == model]["kendall_tau"].mean(), 3),
+            round(perf_df[perf_df["model"] == model]["regret"].mean(), 3),
+        )
+
+    save = parser.save
+    if type(perf_dicts[0]) == list:
+        full_perf_df = []
+        for i in range(len(perf_dicts[0])):
+            sub_perf_dict = pd.concat([pd.DataFrame(x[i]) for x in perf_dicts])
+            full_perf_df.append(sub_perf_dict)
+        for perf_df in full_perf_df:
+            for model in perf_df["model"].unique():
+                print_perf_df(perf_df, model)
+        full_perf_df = pd.concat(full_perf_df)
+    elif type(perf_dicts[0]) == dict:
+        full_perf_df = pd.concat([pd.DataFrame(x) for x in perf_dicts])
+        for model in full_perf_df["model"].unique():
+            print_perf_df(full_perf_df, model)
+    if save:
+        if not os.path.exists(f"performance_excels/{parser.dataset}"):
+            os.mkdir(f"performance_excels/{parser.dataset}")
+        if len(parser.label_component) == 1:
+            comp = parser.label_component[0]
+        elif len(parser.label_component) == 2:
+            comp = "both"
+        if parser.n_missing_reaction == 0:
+            full_perf_df.to_excel(
+                f"performance_excels/{parser.dataset}/{parser.feature}_{comp}_{parser.train_together}.xlsx"
+            )
+        else:
+            full_perf_df.to_excel(
+                f"performance_excels/{parser.dataset}/{parser.feature}_{comp}_{parser.train_together}_rem{parser.n_missing_reaction}rxns.xlsx"
+            )
 
 
 def main(parser):

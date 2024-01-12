@@ -46,18 +46,11 @@ class RPC(BaseEstimator):
         penalty="l1",
         random_state=42,
         solver="liblinear"
-        # base_learner,
-        # cross_validator=None,
-        # vote_aggregator
     ):
         self.C = C
         self.penalty = penalty
         self.random_state = random_state
         self.solver = solver
-        # self.base_learner = base_learner
-        # self.cross_validator = cross_validator
-        # self.vote_aggregator = vote_aggregator
-
     def fit(self, X, y):
         """Builds a binary classifier for all possible pairs of labels.
 
@@ -88,8 +81,6 @@ class RPC(BaseEstimator):
                     & (~np.isnan(sub_y[:, 1]))
                     & (sub_y[:, 0] != sub_y[:, 1])
                 ]
-                # if self.cross_validator is None:
-                # model = deepcopy(self.base_learner)
                 model = LogisticRegression(
                     penalty=self.penalty,
                     C=self.C,
@@ -97,10 +88,6 @@ class RPC(BaseEstimator):
                     solver=self.solver,
                 )
                 model.fit(sub_X, sub_preference)
-                # else:
-                #     self.cross_validator.fit(sub_X, sub_preference)
-                #     model = self.cross_validator.best_estimator_
-                # print(self.cross_validator.best_params_)
                 self.learner_by_column_pair.update({column_combination: model})
             # If there one label constantly is preferred over the other
             elif len(sub_preference) > 0:
@@ -481,11 +468,9 @@ class LabelRankingRandomForest(BaseEstimator):
         self,
         n_estimators=50,
         max_depth=8,
-        # cross_validator=None,
     ):
         self.n_estimators = n_estimators
         self.max_depth = max_depth
-        # self.cross_validator = cross_validator
 
     def get_params(self, deep=True):
         return {"n_estimators": self.n_estimators, "max_depth": self.max_depth}
@@ -507,13 +492,8 @@ class LabelRankingRandomForest(BaseEstimator):
             Output array of ranks.
         """
         # Applies TLAC to y array
-        # print(y)
         tlac_y = np.nanargmin(y, axis=1)
 
-        # if self.cross_validator is not None:
-        #     self.cross_validator.fit(X, tlac_y)
-        #     model = self.cross_validator.best_estimator_
-        # else:
         model = RandomForestClassifier(
             n_estimators=self.n_estimators,
             max_depth=self.max_depth,
@@ -669,10 +649,6 @@ class BoostLR:
                 X_sample, y_sample = X, y
             model = deepcopy(self.base_learner)
             model.fit(X_sample, y_sample)
-            # print(model.predict(X_sample))
-            # print(y_sample)
-            # print()
-            # print()
             weak_learner_list.append(model)  # Line 5 Fitting weak learner
             X_pred = model.predict(X)
             l_t = np.array(
@@ -742,7 +718,4 @@ class BoostLR:
         final_score = np.sum(score_array, axis=2)
         order = np.argsort(final_score, axis=1)
         rank = np.argsort(order, axis=1)
-        # print(final_score)
-        # print(rank)
-        # print()
         return np.ones_like(rank) * rank.shape[1] - rank
