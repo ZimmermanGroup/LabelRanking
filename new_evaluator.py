@@ -18,7 +18,6 @@ PERFORMANCE_DICT = {
     "test_compound": [],
     "model": [],
 }
-np.random.seed(42)
 
 
 class Evaluator(ABC):
@@ -44,6 +43,27 @@ class Evaluator(ABC):
         self.outer_cv = outer_cv
         self.n_rxns_to_erase = n_rxns_to_erase
         self.n_evaluations = n_evaluations
+
+        np.random.seed(42)
+        if self.n_rxns_to_erase >= 1 :
+            self.inds_to_erase = []
+            for i, (train_inds, _) in enumerate(self.outer_cv.split()) :
+                if self.dataset.for_regressor :
+                    shape = (len(train_inds)//self.dataset.n_rank_component, self.dataset.n_rank_component)
+                else:
+                    shape = (len(train_inds), self.dataset.n_rank_component)
+                cover_inds = []
+                for j in range(self.n_evaluations):
+                    random_numbers = np.random.rand(shape[0], shape[1])
+                    cover_inds.append(
+                        (
+                            np.repeat(np.arange(shape[0]), self.n_rxns_to_erase).flatten(),
+                            np.argpartition(random_numbers, kth=self.n_rxns_to_erase, axis=1)[
+                                :, : self.n_rxns_to_erase
+                            ].flatten(),
+                        )
+                    )
+                self.inds_to_erase.append(cover_inds)
 
     def _update_perf_dict(self, perf_dict, kt, rr, mrr, regret, comp, model):
         """Updates the dictionary keeping track of performances.
@@ -242,35 +262,6 @@ class Evaluator(ABC):
     def train_and_evaluate_models(self):
         pass
 
-    # TODO  NEED TO SOMEHOW MOVE UNDER __INIT__ SO THAT IT IS REPRODUCIBLE EACH TIME
-    def _random_selection_of_inds_to_erase(self, n_training_substrates):
-        """Prepares an array of random numbers between 0 and 1 to be used to
-        erase the same reactions across regression and label ranking models.
-
-        Parameters
-        ----------
-        n_training_substrates : int
-            Number of training substrates to prepare for.
-        
-        Returns
-        -------
-        list_of_inds_to_cover : list of tuples
-            array of row indices and array of column indices to remove.
-        """
-        list_of_inds_to_cover = []
-        shape = (n_training_substrates, self.dataset.n_rank_component)
-        for i in range(self.n_evaluations):
-            random_numbers = np.random.rand(shape[0], shape[1])
-            list_of_inds_to_cover.append(
-                (
-                    np.repeat(np.arange(shape[0]), self.n_rxns_to_erase).flatten(),
-                    np.argpartition(random_numbers, kth=self.n_rxns_to_erase, axis=1)[
-                        :, : self.n_rxns_to_erase
-                    ].flatten(),
-                )
-            )
-        return list_of_inds_to_cover
-
     def _CV_loops(
         self, perf_dict, cv, X, y, further_action_before_logging, y_yield=None
     ):
@@ -313,8 +304,6 @@ class Evaluator(ABC):
                 y_yield_train = y_yield[train_ind]
             print()
             print("CV FOLD", a)
-            if self.n_rxns_to_erase >= 1:
-                list_of_inds_to_erase = self._random_selection_of_inds_to_erase(len(train_ind))
             for eval_loop_num in range(self.n_evaluations):
                 print("EVALUATION #", eval_loop_num)
                 if self.n_rxns_to_erase >= 1:
@@ -322,7 +311,7 @@ class Evaluator(ABC):
                     if X is not None:
                         X_train = std.transform(X[train_ind, :])
                     y_train, y_test = y[train_ind], y[test_ind]
-                    inds_to_erase = list_of_inds_to_erase[eval_loop_num]
+                    inds_to_erase = self.inds_to_erase[a][eval_loop_num]
                     # For regressors
                     if type(self) == RegressorEvaluator:
                         inds_to_remove = []
@@ -414,7 +403,6 @@ class Evaluator(ABC):
                             )
                             model.fit(train_dists, y_train)
                         else:
-                            print("Y TRAIN SHAPE", y_train.shape)
                             model.fit(X_train, y_train)
                     ###### EVALUATION PHASE ###### 
                     # For baseline
@@ -437,7 +425,6 @@ class Evaluator(ABC):
                             model, test_dists, y_yield_test
                         )
                     else:
-                        print("Y YIELD TEST", y_yield_test)
                         (
                             processed_y_test,
                             processed_pred_rank,
@@ -981,7 +968,6 @@ class LabelRankingEvaluator(Evaluator):
                 "Validation",
                 model_name,
             )
-        print(self.valid_dict)
         return self
 
 

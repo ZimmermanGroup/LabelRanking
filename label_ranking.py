@@ -70,7 +70,7 @@ class RPC(BaseEstimator):
             Output array of continuous yield values.
         """
         self.learner_by_column_pair = {}
-        print(y)
+        
         self.n_labels = y.shape[1]
         for column_combination in combinations(range(y.shape[1]), 2):
             sub_y = y[:, list(column_combination)]

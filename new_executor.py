@@ -133,7 +133,12 @@ def prepare_stratified_kfold_by_top_condition(X, y_ranking, n_splits):
     outer_ps : PredefinedSplit object
         Predefined split to be used for evaluation.
     """
-    nonzero_rows, top_condition = np.where(y_ranking == 1)
+    # nonzero_rows, top_condition = np.where(y_ranking == 1)
+    nonzero_rows, top_condition = [], []
+    for i, row in enumerate(y_ranking) :
+        if min(row) < y_ranking.shape[1] + 1 :
+            nonzero_rows.append(i)
+            top_condition.append(np.argmin(row))
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
     outer_ps_array = -1 * np.ones(X.shape[0])
     for fold, (_, test) in enumerate(skf.split(X[nonzero_rows], top_condition)):

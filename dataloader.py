@@ -6,6 +6,7 @@ from rdkit.Chem import rdFingerprintGenerator, AllChem
 from sklearn.preprocessing import OneHotEncoder
 from abc import ABC
 import joblib
+from scipy.stats.mstats import rankdata
 
 np.random.seed(42)
 
@@ -23,16 +24,22 @@ def yield_to_ranking(yield_array):
     ranking_array : np.ndarray of shape (n_samples, n_conditions)
         Array of ranking values. Lower values correspond to higher yields.
     """
-    if len(yield_array.shape) == 2:
-        raw_rank = yield_array.shape[1] - np.argsort(
-            np.argsort(yield_array, axis=1), axis=1
-        )
-        for i, row in enumerate(yield_array):
-            raw_rank[i, np.where(row == 0)[0]] = len(row > 0)
-        # print("Raw rank", raw_rank)
-    elif len(yield_array.shape) == 1:
-        raw_rank = len(yield_array) - np.argsort(np.argsort(yield_array))
-        raw_rank[np.where(raw_rank == 0)[0]] = len(raw_rank)
+    # if len(yield_array.shape) == 2:
+    #     raw_rank = yield_array.shape[1] - np.argsort(
+    #         np.argsort(yield_array, axis=1), axis=1
+    #     )
+    #     for i, row in enumerate(yield_array):
+    #         raw_rank[i, np.where(row == 0)[0]] = len(row > 0)
+    #     # print("Raw rank", raw_rank)
+    # elif len(yield_array.shape) == 1:
+    #     raw_rank = len(yield_array) - np.argsort(np.argsort(yield_array))
+    #     raw_rank[np.where(raw_rank == 0)[0]] = len(raw_rank)
+    copy = deepcopy(yield_array)
+    if copy.ndim == 1 :
+        copy = np.expand_dims(copy, 0)
+    raw_rank = copy.shape[1] + 1 - rankdata(copy, axis=1)
+    for i, row in enumerate(copy):
+        raw_rank[i, np.where(row == 0)[0]] = copy.shape[1] + 1
     return raw_rank
 
 
