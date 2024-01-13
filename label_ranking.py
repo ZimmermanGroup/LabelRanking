@@ -8,6 +8,7 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.base import BaseEstimator
 from sklearn.utils import resample
 from sklearn.metrics import make_scorer
+from sklearn.model_selection import GridSearchCV
 from scipy.stats import kendalltau, mstats
 from math import log
 from rank_aggregation import *
@@ -45,15 +46,19 @@ class RPC(BaseEstimator):
 
     def __init__(
         self,
-        C=1,
-        penalty="l1",
-        random_state=42,
-        solver="liblinear"
+        # C=1,
+        # penalty="l1",
+        # random_state=42,
+        # solver="liblinear"
+        n_estimators=10,
+        max_depth=1
     ):
-        self.C = C
-        self.penalty = penalty
-        self.random_state = random_state
-        self.solver = solver
+        # self.C = C
+        # self.penalty = penalty
+        # self.random_state = random_state
+        # self.solver = solver
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
     def fit(self, X, y):
         """Builds a binary classifier for all possible pairs of labels.
 
@@ -65,6 +70,7 @@ class RPC(BaseEstimator):
             Output array of continuous yield values.
         """
         self.learner_by_column_pair = {}
+        print(y)
         self.n_labels = y.shape[1]
         for column_combination in combinations(range(y.shape[1]), 2):
             sub_y = y[:, list(column_combination)]
@@ -84,11 +90,15 @@ class RPC(BaseEstimator):
                     & (~np.isnan(sub_y[:, 1]))
                     & (sub_y[:, 0] != sub_y[:, 1])
                 ]
-                model = LogisticRegression(
-                    penalty=self.penalty,
-                    C=self.C,
-                    random_state=self.random_state,
-                    solver=self.solver,
+                # model = LogisticRegression(
+                #     penalty=self.penalty,
+                #     C=self.C,
+                #     random_state=self.random_state,
+                #     solver=self.solver,
+                # )
+                model = RandomForestClassifier(
+                    n_estimators=self.n_estimators,
+                    max_depth=self.max_depth
                 )
                 model.fit(sub_X, sub_preference)
                 self.learner_by_column_pair.update({column_combination: model})

@@ -157,11 +157,21 @@ def lr_names_to_model_objs(lr_names, inner_ps):
     lr_objs : list of GridSearchCV objects.
     """
     convert_dict = {
-        "RPC": GridSearchCV(
+        # "RPC": GridSearchCV(
+        #     RPC(),
+        #     param_grid={
+        #         "C": [0.1, 0.3, 1, 3, 10], 
+        #         "penalty": ["l1", "l2"],
+        #     },
+        #     scoring=kt_score,
+        #     cv=inner_ps,
+        #     n_jobs=-1,
+        # ),
+        "RPC" : GridSearchCV(
             RPC(),
             param_grid={
-                "C": [0.1, 0.3, 1, 3, 10],  # 0.1,0.3,,3,10
-                "penalty": ["l1", "l2"],  # "l1",
+                "n_estimators":[10,25,50,100],
+                "max_depth":[2,4,None]
             },
             scoring=kt_score,
             cv=inner_ps,
@@ -481,7 +491,9 @@ def parse_perf_dicts(parser, perf_dicts):
     if save:
         if not os.path.exists(f"performance_excels/{parser.dataset}"):
             os.mkdir(f"performance_excels/{parser.dataset}")
-        if len(parser.label_component) == 1:
+        if parser.label_component is None :
+            comp = "None"
+        elif len(parser.label_component) == 1:
             comp = parser.label_component[0]
         elif len(parser.label_component) == 2:
             comp = "both"

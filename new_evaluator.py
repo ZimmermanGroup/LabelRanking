@@ -242,25 +242,23 @@ class Evaluator(ABC):
     def train_and_evaluate_models(self):
         pass
 
-    def _random_selection_of_inds_to_erase(self):
+    # TODO  NEED TO SOMEHOW MOVE UNDER __INIT__ SO THAT IT IS REPRODUCIBLE EACH TIME
+    def _random_selection_of_inds_to_erase(self, n_training_substrates):
         """Prepares an array of random numbers between 0 and 1 to be used to
         erase the same reactions across regression and label ranking models.
 
-        Currently hard-coding the shape of the array generated."""
+        Parameters
+        ----------
+        n_training_substrates : int
+            Number of training substrates to prepare for.
+        
+        Returns
+        -------
+        list_of_inds_to_cover : list of tuples
+            array of row indices and array of column indices to remove.
+        """
         list_of_inds_to_cover = []
-        if type(self.dataset) == dataloader.NatureDataset:
-            if self.dataset.component_to_rank == "amine":
-                shape = (53, self.dataset.n_rank_component)
-            else:
-                shape = (18, self.dataset.n_rank_component)
-        elif type(self.dataset) == dataloader.DeoxyDataset:
-            shape = (31, self.dataset.n_rank_component)
-        elif type(self.dataset) == dataloader.InformerDataset:
-            shape = (10, self.dataset.n_rank_component)
-        elif type(self.dataset) == dataloader.ScienceDataset:
-            # TODO need to fix so that the shape[0] corresponds to the num rows in test fold
-            shape = (self.dataset.y_ranking.shape[0], self.dataset.n_rank_component)
-            print("SHAPE", shape)
+        shape = (n_training_substrates, self.dataset.n_rank_component)
         for i in range(self.n_evaluations):
             random_numbers = np.random.rand(shape[0], shape[1])
             list_of_inds_to_cover.append(
@@ -316,7 +314,7 @@ class Evaluator(ABC):
             print()
             print("CV FOLD", a)
             if self.n_rxns_to_erase >= 1:
-                list_of_inds_to_erase = self._random_selection_of_inds_to_erase()
+                list_of_inds_to_erase = self._random_selection_of_inds_to_erase(len(train_ind))
             for eval_loop_num in range(self.n_evaluations):
                 print("EVALUATION #", eval_loop_num)
                 if self.n_rxns_to_erase >= 1:
@@ -341,28 +339,14 @@ class Evaluator(ABC):
                         ]
                         y_train = y_train[inds_to_keep]
                         X_train = X_train[inds_to_keep]
-                        if a == 0:
-                            print("PROCESSED X TRAIN SHAPE", X_train.shape)
                     elif type(self) == MulticlassEvaluator:
                         y_train_missing = deepcopy(y_yield_train).astype(float)
-                        if type(self.dataset) != dataloader.ScienceDataset:
-                            y_train_missing[inds_to_erase] = np.nan
-                        else:
-                            y_train_missing[
-                                [x for x in range(y_train_missing.shape[0])],
-                                [inds_to_erase[1][x] for x in train_ind],
-                            ] = np.nan
+                        y_train_missing[inds_to_erase] = np.nan
                         y_train = np.nanargmax(y_train_missing, axis=1)
                     # For label ranking
                     else:
                         y_train_missing = deepcopy(y_train).astype(float)
-                        if type(self.dataset) != dataloader.ScienceDataset:
-                            y_train_missing[inds_to_erase] = np.nan
-                        else:
-                            y_train_missing[
-                                [x for x in range(y_train_missing.shape[0])],
-                                [inds_to_erase[1][x] for x in train_ind],
-                            ] = np.nan
+                        y_train_missing[inds_to_erase] = np.nan
                         if type(self) == LabelRankingEvaluator:
                             y_train = mstats.rankdata(
                                 np.ma.masked_invalid(y_train_missing), axis=1
@@ -746,7 +730,6 @@ class MultilabelEvaluator(MulticlassEvaluator):
         Cross-validation scheme to 'evaluate' the algorithms.
 
     """
-
     def __init__(
         self,
         dataset,
@@ -827,7 +810,10 @@ class MultilabelEvaluator(MulticlassEvaluator):
             # print(pred_proba)
         else:
             # print(X_test)
-            pred_proba = model.predict_proba(X_test)
+            if X_test.ndim == 1 :
+                pred_proba = model.predict_proba(X_test.reshape(1,-1))
+            else :
+                pred_proba = model.predict_proba(X_test)
         print("PRED PROBA SHAPE", pred_proba)
         if self.dataset.train_together or type(self.dataset) in [
             dataloader.UllmannDataset,
@@ -932,7 +918,10 @@ class LabelRankingEvaluator(Evaluator):
     def _processing_before_logging(self, model, X_test, y_yield_test):
         if type(self.dataset) == dataloader.InformerDataset:
             y_test_reshape = y_yield_test.flatten()
-            pred_rank_reshape = model.predict(X_test).flatten()
+            if X_test.ndim == 1 :
+                pred_rank_reshape = model.predict(X_test.reshape(1,-1)).flatten()
+            else :
+                pred_rank_reshape = model.predict(X_test).flatten()
         else :
             y_test_reshape = y_yield_test
             pred_rank_reshape = model.predict(X_test)
