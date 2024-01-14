@@ -6,9 +6,10 @@ from dataloader import yield_to_ranking
 from abc import ABC, abstractmethod
 from label_ranking import *
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV, PredefinedSplit
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
+from scipy.stats.mstats import rankdata
 
 PERFORMANCE_DICT = {
     "kendall_tau": [],
@@ -17,6 +18,7 @@ PERFORMANCE_DICT = {
     "regret": [],
     "test_compound": [],
     "model": [],
+    "evaluation_loop":[]
 }
 
 
@@ -43,29 +45,10 @@ class Evaluator(ABC):
         self.outer_cv = outer_cv
         self.n_rxns_to_erase = n_rxns_to_erase
         self.n_evaluations = n_evaluations
-
-        np.random.seed(42)
         if self.n_rxns_to_erase >= 1 :
-            self.inds_to_erase = []
-            for i, (train_inds, _) in enumerate(self.outer_cv.split()) :
-                if self.dataset.for_regressor :
-                    shape = (len(train_inds)//self.dataset.n_rank_component, self.dataset.n_rank_component)
-                else:
-                    shape = (len(train_inds), self.dataset.n_rank_component)
-                cover_inds = []
-                for j in range(self.n_evaluations):
-                    random_numbers = np.random.rand(shape[0], shape[1])
-                    cover_inds.append(
-                        (
-                            np.repeat(np.arange(shape[0]), self.n_rxns_to_erase).flatten(),
-                            np.argpartition(random_numbers, kth=self.n_rxns_to_erase, axis=1)[
-                                :, : self.n_rxns_to_erase
-                            ].flatten(),
-                        )
-                    )
-                self.inds_to_erase.append(cover_inds)
+            np.random.seed(42)
 
-    def _update_perf_dict(self, perf_dict, kt, rr, mrr, regret, comp, model):
+    def _update_perf_dict(self, perf_dict, kt, rr, mrr, regret, comp, model, eval_loop):
         """Updates the dictionary keeping track of performances.
 
         Parameters
@@ -85,6 +68,8 @@ class Evaluator(ABC):
             Compound index of the test compound.
         model : str
             Name of the model
+        eval_loop : int
+            Evaluation loop index.
 
         Returns
         -------
@@ -98,6 +83,7 @@ class Evaluator(ABC):
             perf_dict["regret"].append(regret)
             perf_dict["test_compound"].append(comp)
             perf_dict["model"].append(model)
+            perf_dict["evaluation_loop"].append(eval_loop)
         elif type(kt) == list:
             assert len(kt) == len(rr)
             assert len(rr) == len(mrr)
@@ -113,8 +99,9 @@ class Evaluator(ABC):
                 perf_dict["model"].extend(model)
             elif type(model) == str:
                 perf_dict["model"].extend([model] * len(kt))
+            perf_dict["evaluation_loop"].extend([eval_loop] * len(kt))
 
-    def _evaluate_alg(self, perf_dict, test_yield, pred_rank, comp, model):
+    def _evaluate_alg(self, perf_dict, test_yield, pred_rank, comp, model, eval_loop=0):
         """Evaluates algorithms on the following metrics
         • 'reciprocal rank' : of the selected n_rxns, the reciprocal of the best ground-truth-rank.
         • 'mean reciprocal rank' : mean of the reciprocal of ground-truth-ranks of all rxns selected by model.
@@ -135,13 +122,25 @@ class Evaluator(ABC):
             Index of test compound.
         model : str
             Name of the algorithm that is evaluated.
+        eval_loop : int
+            Index of evaluation loop.
 
         Returns
         -------
         self (with updated perf_dict)
         """
-        test_rank = yield_to_ranking(test_yield)
+        def _yield_to_rank_with_ties(yield_array):
+            copy = deepcopy(yield_array)
+            if copy.ndim == 1 :
+                copy = np.expand_dims(copy, 0)
+            raw_rank = copy.shape[1] + 1 - rankdata(copy, axis=1)
+            for i, row in enumerate(copy):
+                raw_rank[i, np.where(row == 0)[0]] = 25 # penalize for picking 0% yielding reaction
+            return raw_rank
+        
+        test_rank = _yield_to_rank_with_ties(test_yield)
         if np.ndim(pred_rank) == 1:
+            test_rank = test_rank.flatten()
             kt = kendalltau(test_rank, pred_rank).statistic
             predicted_highest_yield_inds = np.argpartition(
                 pred_rank.flatten(), self.n_rxns
@@ -192,8 +191,9 @@ class Evaluator(ABC):
                 axis=1,
             )
             regret = list(raw_regret.flatten())
-        print(rr, regret)
-        self._update_perf_dict(perf_dict, kt, rr, mrr, regret, comp, model)
+        print("RECIPROCAL RANK", rr)
+        print("REGRET", regret)
+        self._update_perf_dict(perf_dict, kt, rr, mrr, regret, comp, model, eval_loop)
 
     def _load_X(self):
         """Prepares the input features based on the specified type."""
@@ -307,11 +307,23 @@ class Evaluator(ABC):
             for eval_loop_num in range(self.n_evaluations):
                 print("EVALUATION #", eval_loop_num)
                 if self.n_rxns_to_erase >= 1:
+                    ### Deciding which reactions to mask out for this evaluation loop in the format of ranking arrays.
+                    if self.dataset.for_regressor :
+                        shape = (len(train_ind)//self.dataset.n_rank_component, self.dataset.n_rank_component)
+                    else:
+                        shape = (len(train_ind), self.dataset.n_rank_component)
+                    random_numbers = np.random.rand(shape[0], shape[1])
+                    inds_to_erase = (
+                        np.repeat(np.arange(shape[0]), self.n_rxns_to_erase).flatten(),
+                        np.argpartition(random_numbers, kth=self.n_rxns_to_erase, axis=1)[
+                            :, : self.n_rxns_to_erase
+                        ].flatten(),
+                    )
+                    print("INDS TO ERASE", inds_to_erase)
                     # Need this block again so that we use the original arrays for different evaluations.
                     if X is not None:
                         X_train = std.transform(X[train_ind, :])
                     y_train, y_test = y[train_ind], y[test_ind]
-                    inds_to_erase = self.inds_to_erase[a][eval_loop_num]
                     # For regressors
                     if type(self) == RegressorEvaluator:
                         inds_to_remove = []
@@ -437,6 +449,7 @@ class Evaluator(ABC):
                         processed_pred_rank,
                         a,
                         model_name,
+                        eval_loop_num
                     )
         return self
 

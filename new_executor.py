@@ -15,7 +15,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Specify the evaluation to run.")
     parser.add_argument(
         "--dataset",
-        help="Which dataset to use. Should be either 'deoxy', 'natureHTE', 'informer'.",
+        help="Which dataset to use. Should be either 'deoxy', 'natureHTE', 'scienceMALDI', 'informer', 'ullmann', 'borylation'.",
     )
     parser.add_argument(
         "--feature",
@@ -24,12 +24,12 @@ def parse_args():
     parser.add_argument(
         "--label_component",
         action="append",
-        help="Which reaction components to consider as 'labels'. For the natureHTE dataset will use as the substrate to test.",
+        help="Which reaction components to consider as 'labels'. For the natureHTE and scienceMALDI datasets will use as the substrate to test.",
     )
     parser.add_argument(
         "--train_together",
         action=argparse.BooleanOptionalAction,
-        help="Whether the non-label reaction component should be treated altogether or as separate datasets. Is not utilized in the natureHTE datset.",
+        help="Whether the non-label reaction component should be treated altogether or as separate datasets. Is not utilized in the paper.",
     )
     parser.add_argument(
         "--rfr", action="store_true", help="Include Random Forest Regressor."

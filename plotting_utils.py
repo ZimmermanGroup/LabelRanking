@@ -676,7 +676,7 @@ def critical_difference_diagram(
     }
 
 
-def plot_rr_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], vline_pos=[1,2,5], save=False):
+def plot_rr_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], vline_pos=[1,2,4], save=False):
     """ Plots a heatmap of reciprocal ranks (RR) achieved by each algorithm in each dataset.
     The annotated numbers are the RR values, while the colors denote the rank of each algorithm 
     in each dataset.
