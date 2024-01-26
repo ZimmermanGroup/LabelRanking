@@ -114,9 +114,38 @@ class NatureDataset(Dataset):
         # Reaction data by substrate type
         if self.component_to_rank == "amine":
             self.df = raw_data[raw_data["Chemistry"] == "Amine"]
-            self.validation_rows = joblib.load(
-                "datasets/natureHTE/nature_amine_inds_to_remove.joblib"
-            )
+            self.smiles_list = self.df["BB SMILES"].unique().tolist()
+            # Filtering out secondary amines
+            primary_amine_smiles = []
+            for smiles in self.smiles_list :
+                mol = Chem.MolFromSmiles(smiles)
+                max_hydrogens = 0
+                for atom in mol.GetAtoms():
+                    if atom.GetSymbol() == 'N':
+                        num_of_h = atom.GetNumImplicitHs()
+                        if num_of_h > max_hydrogens:
+                            max_hydrogens = num_of_h
+                if max_hydrogens == 2 :
+                    primary_amine_smiles.append(smiles)
+            # Filtering out cases where the top case is a tie between condition 0 and another one.
+            inds_to_remove_from_primary_amine_smiles = []
+            for i, row in enumerate(self.df[self.df["BB SMILES"].isin(primary_amine_smiles)].iloc[:, -1].to_numpy().flatten().reshape(len(primary_amine_smiles),4)) :
+                if np.argmax(row) ==0 and len(np.unique(row)) != len(row) :
+                    inds_to_remove_from_primary_amine_smiles.append(i)
+            self.smiles_to_keep = [item for i, item in enumerate(primary_amine_smiles) if i not in inds_to_remove_from_primary_amine_smiles]
+            # Randomly removing 17 cases where condition 0 is top-yielding
+            random_removal = [0, 1, 2, 3, 4, 5, 8, 9, 11, 12, 13, 15, 16, 17, 21, 22, 24] # the first array when you run np.random.seed(42) \n sorted(np.random.choice(27, size=17, replace=False))
+            counter = 0
+            inds_to_further_remove = []
+            temp_y_array = self.df[self.df["BB SMILES"].isin(self.smiles_to_keep)].iloc[:, -1].to_numpy().flatten().reshape(len(self.smiles_to_keep),4)
+            for i, row in enumerate(temp_y_array) :
+                if np.argmax(row) == 0  :
+                    if counter in random_removal :
+                        inds_to_further_remove.append(i)
+                    counter += 1
+            self.smiles_to_keep = [item for i, item in enumerate(self.smiles_to_keep) if i not in inds_to_further_remove]
+            temp_y_array = self.df[self.df["BB SMILES"].isin(self.smiles_to_keep)].iloc[:, -1].to_numpy().flatten().reshape(len(self.smiles_to_keep),4)
+            self.validation_rows = [i for i, item in enumerate(self.smiles_list) if item not in self.smiles_to_keep]            
         elif self.component_to_rank == "sulfonamide":
             self.df = raw_data[raw_data["Chemistry"] == "Sulfonamide"].reset_index()
             self.validation_rows = joblib.load(
@@ -124,9 +153,20 @@ class NatureDataset(Dataset):
             )
         elif self.component_to_rank == "amide":
             self.df = raw_data[raw_data["Chemistry"] == "Amide"].reset_index()
-            self.validation_rows = joblib.load(
-                "datasets/natureHTE/nature_amide_inds_to_remove.joblib"
-            )
+            self.smiles_list = self.df["BB SMILES"].unique().tolist()
+            # Filtering out secondary amides
+            self.smiles_to_keep = []
+            for smiles in self.smiles_list :
+                mol = Chem.MolFromSmiles(smiles)
+                max_hydrogens = 0
+                for atom in mol.GetAtoms():
+                    if atom.GetSymbol() == 'N':
+                        num_of_h = atom.GetNumImplicitHs()
+                        if num_of_h > max_hydrogens:
+                            max_hydrogens = num_of_h
+                if max_hydrogens == 2 :
+                    self.smiles_to_keep.append(smiles)
+            self.validation_rows = [i for i, item in enumerate(self.smiles_list) if item not in self.smiles_to_keep]
         elif self.component_to_rank == "thiol":
             self.df = raw_data[raw_data["Chemistry"] == "Thiol"].reset_index()
             self.validation_rows = []
@@ -214,6 +254,30 @@ class NatureDataset(Dataset):
             np.vstack(tuple(fp_arrays))
         )
         return self._X_fp
+
+    @property
+    def X_desc(self):
+        """
+        Prepares descriptor arrays.
+        """
+        desc_array = pd.read_excel(f"datasets/natureHTE/{self.component_to_rank}_descriptors.xlsx").to_numpy()[:, 1:]
+        if self.for_regressor :
+            reagent_arrays = []
+            for i, row in self.df.iterrows():
+                if self.component_to_rank not in ["sulfonamide", "thiol"] and row["BB SMILES"] not in self.smiles_to_keep:
+                    continue
+                cat_desc = self.reagent_data[row["Catalyst"]].reshape(1, -1)
+                base_desc = self.reagent_data[row["Base"]].reshape(1, -1)
+                reagent_arrays.append(np.hstack((cat_desc, base_desc)))
+            self._X_desc = np.hstack((
+                np.repeat(desc_array, 4, axis=0),
+                np.vstack(tuple(reagent_arrays))
+            ))
+        else :
+            self._X_desc = desc_array
+        if self.component_to_rank in ["sulfonamide", "thiol"]:
+            self._X_desc, self.X_valid = self._split_train_validation(self._X_desc)
+        return self._X_desc
 
     @property
     def X_onehot(self):
@@ -678,6 +742,21 @@ class DeoxyDataset(Dataset):
         self.descriptors = pd.read_csv(
             "datasets/deoxyfluorination/descriptor_table.csv"
         ).to_numpy()
+        self._raw_substrate_dft_desc = pd.read_csv(
+            "datasets/deoxyfluorination/alcohols_M062X.csv",
+            usecols=["name", "dipole", "electronegativity", "electronic_spatial_extent", "hardness", "homo_energy", "lumo_energy",
+                     "C_Mulliken_charge", "C_NMR_anisotropy", "C_NMR_shift", "C_NPA_charge", "C_VBur", 
+                     "O_Mulliken_charge", "O_NMR_anisotropy", "O_NMR_shift", "O_NPA_charge", "O_VBur", 
+                     "order", "C_angle", "OC_length", "OC_L", "OC_B1", "OC_B5", "C_PVBur"
+                     ]
+        )
+        self._raw_substrate_dft_desc["order"] = self._raw_substrate_dft_desc["order"].map(
+            {"primary":1, "secondary":2, "tertiary":3}
+        )
+        self.reagent_desc = pd.read_csv(
+            "datasets/deoxyfluorination/descriptor_table.csv"
+        ).to_numpy()[:, -4:]
+
         self.onehot = pd.read_csv(
             "datasets/deoxyfluorination/descriptor_table-OHE.csv"
         ).to_numpy()
@@ -802,31 +881,49 @@ class DeoxyDataset(Dataset):
         """
         Prepares descriptor arrays.
         """
-        if self.for_regressor:
-            if self.component_to_rank == "both" or self.train_together:
-                self._X_desc = deepcopy(self.descriptors)
-            else:
-                self._X_desc = self._combine_desc_arrays(
-                    self.descriptors[[20 * x for x in range(32)], :19],
-                    self.descriptors[[20 * x for x in range(32)], 19:],
-                )
-        else:
-            if self.component_to_rank == "both":
-                self._X_desc = self.descriptors[
-                    [20 * x for x in range(32)], :19
-                ]  #  19=number of substrate descriptors
-            elif self.component_to_rank in ["base", "sulfonyl_fluoride"]:
-                if self.train_together:
-                    # This case the features of reaction component that is not ranked are inputs
-                    self._X_desc = self._combine_desc_arrays(
-                        self.descriptors[[20 * x for x in range(32)], :19],
-                        self.descriptors[[20 * x for x in range(32)], 19:],
-                    )
-                else:
-                    # This case the substrates are the only inputs.
-                    self._X_desc = [
-                        self.descriptors[[20 * x for x in range(32)], :19]
-                    ] * self.n_non_rank_component
+        import csv
+        with open("datasets/deoxyfluorination/descriptor_table-OHE.csv", newline="") as f :
+            reader = csv.reader(f)
+            first_row=next(reader)[:-9]
+        f.close()
+        alcohol_inds = [x[8:] for x in first_row]
+        subs_desc_rows = [self._raw_substrate_dft_desc[
+            self._raw_substrate_dft_desc["name"]==x
+        ].to_numpy()[0, 1:] for x in alcohol_inds]
+        self._full_subs_desc = np.vstack(tuple(subs_desc_rows))
+
+        if self.for_regressor :
+            self._X_desc = self._combine_desc_arrays(
+                self._full_subs_desc, 
+                self.reagent_desc
+            )
+        else :
+            self._X_desc = [self._full_subs_desc] * self.n_non_rank_component
+        # if self.for_regressor:
+        #     if self.component_to_rank == "both" or self.train_together:
+        #         self._X_desc = deepcopy(self.descriptors)
+        #     else:
+        #         self._X_desc = self._combine_desc_arrays(
+        #             self.descriptors[[20 * x for x in range(32)], :19],
+        #             self.descriptors[[20 * x for x in range(32)], 19:],
+        #         )
+        # else:
+        #     if self.component_to_rank == "both":
+        #         self._X_desc = self.descriptors[
+        #             [20 * x for x in range(32)], :19
+        #         ]  #  19=number of substrate descriptors
+        #     elif self.component_to_rank in ["base", "sulfonyl_fluoride"]:
+        #         if self.train_together:
+        #             # This case the features of reaction component that is not ranked are inputs
+        #             self._X_desc = self._combine_desc_arrays(
+        #                 self.descriptors[[20 * x for x in range(32)], :19],
+        #                 self.descriptors[[20 * x for x in range(32)], 19:],
+        #             )
+        #         else:
+        #             # This case the substrates are the only inputs.
+        #             self._X_desc = [
+        #                 self.descriptors[[20 * x for x in range(32)], :19]
+        #             ] * self.n_non_rank_component
 
         return self._X_desc
 
@@ -868,7 +965,7 @@ class DeoxyDataset(Dataset):
         Parameters
         ----------
         y_array : np.ndarray of shape (n_substrates*n_rxn_component1, n_rxn_component2)
-            Yield array of reactions where rows are repeated by some reaction component.
+            Yield array of reactions where rows are repeated by one reagent class.
             i.e. row1 = substrate 1 & reagent A, row2 = substrate 1 & reagent B,
                  row3 = substrate 2 & reagent A, row4 = substrate 2 & reagent B
                  •••
@@ -1012,7 +1109,7 @@ class ScienceDataset(Dataset):
     X_fp : np.2darray of shape (n_samples, n_bits)
     """
 
-    def __init__(self, for_regressor, component_to_rank, n_rxns):
+    def __init__(self, for_regressor, component_to_rank, n_rxns=1):
         self.for_regressor = for_regressor
         self.component_to_rank = component_to_rank
         self.n_rxns = n_rxns
@@ -1042,8 +1139,10 @@ class ScienceDataset(Dataset):
             )
             if self.component_to_rank == "whole_bromide":
                 self.df = self.df.iloc[:192, :]
+                self.desc_df = pd.read_excel("datasets/science_dark/whole_bromide_descriptors.xlsx").to_numpy()[:, 1:]
             elif self.component_to_rank == "whole_amine":
                 self.df = self.df.iloc[192:, :]
+                self.desc_df = pd.read_excel("datasets/science_dark/whole_amine_descriptors.xlsx").to_numpy()[:, 1:]
         self.df = self.df[(self.df.iloc[:, 1:] != 0).any(axis=1)]
         self.smiles_list = []
         self.nan_ind = []
@@ -1092,6 +1191,19 @@ class ScienceDataset(Dataset):
             )
         return self._X_fp
     
+    @property
+    def X_desc(self):
+        """
+        Prepares descriptor arrays.
+        """
+        self._X_desc = deepcopy(self.desc_df)
+        if self.for_regressor :
+            self._X_desc = np.hstack((
+                np.repeat(self._X_desc, 4, axis=0),
+                np.tile(np.identity(4), [self._X_desc.shape[0], 1]),
+            ))
+        return self._X_desc
+
     @property
     def X_random(self, fpSize=1024, radius=3):
         """ Prepares a randomly mixed fingerprint array of substrates.
