@@ -262,22 +262,48 @@ class NatureDataset(Dataset):
         """
         desc_array = pd.read_excel(f"datasets/natureHTE/{self.component_to_rank}_descriptors.xlsx").to_numpy()[:, 1:]
         if self.for_regressor :
-            reagent_arrays = []
+            self._reagent_arrays = []
             for i, row in self.df.iterrows():
                 if self.component_to_rank not in ["sulfonamide", "thiol"] and row["BB SMILES"] not in self.smiles_to_keep:
                     continue
                 cat_desc = self.reagent_data[row["Catalyst"]].reshape(1, -1)
                 base_desc = self.reagent_data[row["Base"]].reshape(1, -1)
-                reagent_arrays.append(np.hstack((cat_desc, base_desc)))
+                self._reagent_arrays.append(np.hstack((cat_desc, base_desc)))
             self._X_desc = np.hstack((
                 np.repeat(desc_array, 4, axis=0),
-                np.vstack(tuple(reagent_arrays))
+                np.vstack(tuple(self._reagent_arrays))
             ))
         else :
             self._X_desc = desc_array
         if self.component_to_rank in ["sulfonamide", "thiol"]:
             self._X_desc, self.X_valid = self._split_train_validation(self._X_desc)
         return self._X_desc
+    
+    @property
+    def X_random(self) :
+        np.random.seed(42)
+        desc_array = pd.read_excel(f"datasets/natureHTE/{self.component_to_rank}_descriptors.xlsx").to_numpy()[:, 1:]
+        self._X_random = np.random.rand(desc_array.shape[0], desc_array.shape[1])
+        if self.for_regressor :
+            _ = self.X_desc
+            reagent_arrays = [array.astype(np.float32) for array in self._reagent_arrays]
+            orig_reagent_arrays = np.vstack(tuple(reagent_arrays))
+            uniq_rows = np.unique(orig_reagent_arrays, axis=0)
+            assert uniq_rows.shape[0] == 4
+            rand_reagent_desc = np.random.rand(
+                uniq_rows.shape[0], 
+                orig_reagent_arrays.shape[1]
+            )
+            rand_reagent_array = np.vstack(tuple(
+                [rand_reagent_desc[np.where(np.all(uniq_rows == row, axis=1))[0][0]] for row in orig_reagent_arrays]
+            ))
+            self._X_random = np.hstack((
+                np.repeat(self._X_random, 4, axis=0),
+                rand_reagent_array,
+            ))
+        if self.component_to_rank in ["sulfonamide", "thiol"]:
+            self._X_random, _ = self._split_train_validation(self._X_random)
+        return self._X_random
 
     @property
     def X_onehot(self):
@@ -899,34 +925,25 @@ class DeoxyDataset(Dataset):
             )
         else :
             self._X_desc = [self._full_subs_desc] * self.n_non_rank_component
-        # if self.for_regressor:
-        #     if self.component_to_rank == "both" or self.train_together:
-        #         self._X_desc = deepcopy(self.descriptors)
-        #     else:
-        #         self._X_desc = self._combine_desc_arrays(
-        #             self.descriptors[[20 * x for x in range(32)], :19],
-        #             self.descriptors[[20 * x for x in range(32)], 19:],
-        #         )
-        # else:
-        #     if self.component_to_rank == "both":
-        #         self._X_desc = self.descriptors[
-        #             [20 * x for x in range(32)], :19
-        #         ]  #  19=number of substrate descriptors
-        #     elif self.component_to_rank in ["base", "sulfonyl_fluoride"]:
-        #         if self.train_together:
-        #             # This case the features of reaction component that is not ranked are inputs
-        #             self._X_desc = self._combine_desc_arrays(
-        #                 self.descriptors[[20 * x for x in range(32)], :19],
-        #                 self.descriptors[[20 * x for x in range(32)], 19:],
-        #             )
-        #         else:
-        #             # This case the substrates are the only inputs.
-        #             self._X_desc = [
-        #                 self.descriptors[[20 * x for x in range(32)], :19]
-        #             ] * self.n_non_rank_component
-
         return self._X_desc
-
+    
+    @property
+    def X_random(self) :
+        np.random.seed(42)
+        _ = self.X_desc
+        orig_desc = deepcopy(self._full_subs_desc)
+        self._X_random = np.random.rand(orig_desc.shape[0], orig_desc.shape[1])
+        if self.for_regressor :
+            orig_reagent_desc = deepcopy(self.reagent_desc)
+            random_reagent_desc = np.random.rand(orig_reagent_desc.shape[0], orig_reagent_desc.shape[1])
+            self._X_random = self._combine_desc_arrays(
+                self._X_random,
+                random_reagent_desc
+            )
+        else :
+            self._X_random = [self._X_random] * self.n_non_rank_component
+        return self._X_random
+        
     @property
     def X_onehot(self):
         "Prepares onehot arrays."  # Finished confirming.
@@ -1205,26 +1222,47 @@ class ScienceDataset(Dataset):
         return self._X_desc
 
     @property
-    def X_random(self, fpSize=1024, radius=3):
-        """ Prepares a randomly mixed fingerprint array of substrates.
+    def X_random(self):
+        """ Substitutes descriptors with randomly prepared values.
         
         Parameters
         ----------
-        fpSize : int
-            Length of the Morgan FP.
-        radius : int
-            Radius of the Morgan FP.
+        None.
 
         Returns
         -------
         X_random : np.ndarray of shape (n_rxns, n_features)
         """
-        original_fp_array = deepcopy(self.X_fp)
-        shuffled_rows = []
-        for row in original_fp_array :
-            np.random.shuffle(row)
-            shuffled_rows.append(row)
-        return np.vstack(tuple(shuffled_rows))
+        np.random.seed(42)
+        orig_desc = deepcopy(self.X_desc)
+        self._X_random = np.random.rand(orig_desc.shape[0], orig_desc.shape[1])
+        if self.for_regressor :
+            self._X_random = np.hstack((
+                np.repeat(self._X_random, 4, axis=0),
+                np.tile(np.identity(4), [self._X_random.shape[0], 1]),
+            ))
+        return self._X_random
+    
+    @property
+    def X_onehot(self):
+        """ Prepares onehot array.
+        
+        Parameters
+        ----------
+        None.
+
+        Returns
+        -------
+        X_onehot : np.ndarray of shape (n_rxns, n_substrates)
+        """
+        orig_desc = deepcopy(self.X_desc)
+        self._X_onehot = np.identity(orig_desc.shape[0])
+        if self.for_regressor :
+            self._X_onehot = np.hstack((
+                np.repeat(self._X_onehot, 4, axis=0),
+                np.tile(np.identity(4), [self._X_onehot.shape[0], 1]),
+            ))
+        return self._X_onehot
 
         
     @property
