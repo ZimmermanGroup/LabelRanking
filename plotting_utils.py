@@ -3,7 +3,157 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats.mstats import rankdata
+from scipy.stats import friedmanchisquare
+import scikit_posthocs as sp
 
+class Analyzer():
+    """ Analyzing results of all datasets in a consistent manner.
+    We assume that all 11 datasets are being analyzed simultaneously.
+
+    Parameters
+    ----------
+    feature : str
+        Featurization used for the models
+    models : list of str
+        Which models are used.
+    """
+    def __init__(self, feature, models, n_rem_rxns=0) :
+        self.feature = feature
+        self.models = models
+        self.n_rem_rxns = n_rem_rxns
+        if self.n_rem_rxns == 0 :
+            filename_appendix = ".xlsx"
+        else :
+            filename_appendix = f"_rem{self.n_rem_rxns}rxns.xlsx"
+        # Loading the datasets
+        self.deoxy_perf_df = pd.read_excel(f"performance_excels/deoxy/{self.feature}_base_None"+filename_appendix)
+        self.amine_perf_df = pd.read_excel(f"performance_excels/natureHTE/{self.feature}_amine_None"+filename_appendix)
+        self.amide_perf_df = pd.read_excel(f"performance_excels/natureHTE/{self.feature}_amide_None"+filename_appendix)
+        self.sulfon_perf_df = pd.read_excel(f"performance_excels/natureHTE/{self.feature}_sulfonamide_None"+filename_appendix)
+        self.thiol_perf_df = pd.read_excel(f"performance_excels/natureHTE/{self.feature}_thiol_None"+filename_appendix)
+        self.whole_amine_perf_df = pd.read_excel(f"performance_excels/scienceMALDI/{self.feature}_whole_amine_None"+filename_appendix)
+        self.whole_bromide_perf_df = pd.read_excel(f"performance_excels/scienceMALDI/{self.feature}_whole_bromide_None"+filename_appendix)
+
+    def _get_different_sf_index_for_deoxy(self, deoxy_df):
+        """ Result files of deoxyfluorination datasets consist of the 5 different sulfonyl fluorides altogether.
+        FInds the indices where results of each sulfonyl fluoride starts.
+        
+        Parameters
+        ----------
+        deoxy_df : pd.DataFrame
+            result datafrmae of deoxy dataset.
+        
+        Returns
+        -------
+        new_comp_starts_at : list of int
+            The indices.
+        """
+        new_comp_starts_at = [0]
+        rfr_inds = deoxy_df[deoxy_df["model"]=="RFR"].index.tolist()
+        for i, ind in enumerate(rfr_inds) :
+            if i> 0 :
+                if ind - rfr_inds[i-1] > 1 :
+                    new_comp_starts_at.append(ind)
+        return new_comp_starts_at
+    
+    def _update_perf_dict(self, dict_to_update, raw_df, model_name, dataset_name) :
+        dict_to_update["model"].append(model_name)
+        dict_to_update["dataset"].append(dataset_name)
+        dict_to_update["average reciprocal rank"].append(
+            raw_df[raw_df["model"]==model_name]["reciprocal_rank"].mean()
+        )
+        dict_to_update["average kendall tau"].append(
+            raw_df[raw_df["model"]==model_name]["kendall_tau"].mean()
+        )
+
+    @property
+    def avg_perf_df(self):
+        """ Collects all results into one dataframe."""
+        
+        avg_perf_dict = {
+            "model":[],
+            "dataset":[],
+            "average reciprocal rank":[],
+            "average kendall tau":[],
+        }
+        deoxy_start_inds = self._get_different_sf_index_for_deoxy(self.deoxy_perf_df)
+        for i, start_ind in enumerate(deoxy_start_inds) :
+            if i!= 4:
+                deoxy_sub_df = self.deoxy_perf_df.iloc[start_ind:deoxy_start_inds[i+1]]
+            else :
+                deoxy_sub_df = self.deoxy_perf_df.iloc[start_ind:]
+            for model in self.models :
+                self._update_perf_dict(avg_perf_dict, deoxy_sub_df, model, f"Deoxy-sulfonyl fluoride {i}")
+
+        nature_HTE_perf_dfs = [self.amine_perf_df, self.amide_perf_df, self.sulfon_perf_df, self.thiol_perf_df]
+        nature_HTE_names = ["amine", "amide", "sulfonamide", "thiol"]
+        for model in self.models :
+            for dataset_name, perf_df in zip(nature_HTE_names, nature_HTE_perf_dfs) :
+                self._update_perf_dict(avg_perf_dict, perf_df, model, f"Nature-{dataset_name}")
+                
+        scienceMALDI_perf_dfs = [self.whole_amine_perf_df, self.whole_bromide_perf_df]
+        scienceMALDI_names = ["whole amine", "whole bromide"]
+        for model in self.models :
+            for dataset_name, perf_df in zip(scienceMALDI_names, scienceMALDI_perf_dfs) :
+                self._update_perf_dict(avg_perf_dict, perf_df, model, f"Science-{dataset_name}")
+
+        self._avg_perf_df = pd.DataFrame(avg_perf_dict)
+        return self._avg_perf_df
+
+def get_rr_kt_tables(avg_perf_df, ordered_cols):
+    """ Separated out from the analyzer because arrays from fingerprints need to be combined with descriptors in some cases."""
+    ### Reformating the dataframe
+    rr_table = pd.pivot_table(avg_perf_df, values="average reciprocal rank", index="dataset", columns="model")
+    kt_table = pd.pivot_table(avg_perf_df, values="average kendall tau", index="dataset", columns="model")
+    return rr_table[ordered_cols], kt_table[ordered_cols]
+
+def run_friedman_tests(rr_Table, kt_table, models):
+    """ Run Friedman rank tests on the ranks of each algorithm across all datasets, measured by 
+    either reciprocal rank or kendall tau.
+    
+    Parameters
+    ----------
+    rr_Table : pd.DataFrame
+        Table of average reciprocal rank values across datasets in each dataset.
+    kt_table : pd.DataFrame
+        Table of average kendall tau values across datasets in each dataset.
+    models : list of str
+        Models to compare between.
+
+    Returns
+    -------
+    rr_pvalue, kt_pvalue : tuple of floats
+        p values obtained for each metric.
+    """
+    ### Getting the rank of algorithms for each dataset in both metrics
+    rr_rank_by_dataset = rr_Table.shape[1] + 1 - rankdata(rr_Table, axis=1)
+    kt_rank_by_dataset = kt_table.shape[1] + 1 - rankdata(kt_table, axis=1)
+
+    ### Friedman test
+    rr_friedman_results = friedmanchisquare(
+        *(rr_rank_by_dataset[:, x] for x in range(len(models)))
+    )
+    kt_friedman_results = friedmanchisquare(
+        *(kt_rank_by_dataset[:, x] for x in range(len(models)))
+    )
+    return rr_friedman_results.pvalue, kt_friedman_results.pvalue
+
+def plot_bonferroni_dunn(table, cols):
+    rank_by_dataset = table.shape[1] + 1 - rankdata(table, axis=1)
+    bonferroni_dunn_test_results = sp.posthoc_dunn(
+        table.unstack().reset_index(name="average rank"), 
+        val_col="average rank",
+        group_col="model",
+        p_adjust="bonferroni"
+    )
+    combined_rr_rank_dict = {x:r for x, r in zip(cols, np.average(rank_by_dataset, axis=0))}
+    plt.set_cmap("viridis")
+    plt.figure(figsize=(3.3,1), dpi=300)
+    _ = critical_difference_diagram(
+        combined_rr_rank_dict, 
+        bonferroni_dunn_test_results, 
+        label_props={"color":"k", "fontfamily":"arial", "fontsize":5}
+    )
 
 def prep_performance_by_model_dict(perf_excel_path):
     """Converts the excel file in the specified path to a dictionary of sub dataframes of each model.
@@ -320,8 +470,6 @@ def AL_average(df_to_plot, rpc_df, rfr_df, xmin, xmax):
 
 ### Borrowed from scikit_posthocs._plotting.py due to unknown error
 from typing import Union, List, Tuple, Dict, Set
-
-import numpy as np
 from matplotlib.axes import SubplotBase
 from matplotlib import pyplot
 from pandas import DataFrame, Series
@@ -676,7 +824,7 @@ def critical_difference_diagram(
     }
 
 
-def plot_rr_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], vline_pos=[1,2,4], save=False):
+def plot_rr_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], vline_pos=[1,2,4], square=False, cbar_kws=None, save=False):
     """ Plots a heatmap of reciprocal ranks (RR) achieved by each algorithm in each dataset.
     The annotated numbers are the RR values, while the colors denote the rank of each algorithm 
     in each dataset.
@@ -689,6 +837,10 @@ def plot_rr_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], vline_p
         Names of algorithms.
     dataset_list : list of str
         Names of datasets.
+    square : bool
+        Whether to make the cells of the heatmap square.
+    cbar_kws : None or dict
+        Used to control the size of the colorbar.
     save : False or str
         Whether to save the resulting plot. If str, will be used as filename.
     
@@ -702,7 +854,7 @@ def plot_rr_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], vline_p
     n_models = len(model_list)
     cmap = sns.color_palette("viridis", n_models)
     vmap = {i: 1+n_models-i for i in range(1,1+n_models)}
-    ax = sns.heatmap(ordered_rr_rank_by_dataset, cmap=cmap, annot=rr_array)
+    ax = sns.heatmap(ordered_rr_rank_by_dataset, cmap=cmap, annot=rr_array, square=square, cbar_kws=cbar_kws)
     # get colorbar from seaborn heatmap
     colorbar = ax.collections[0].colorbar
     # define discrete intervals for colorbar
@@ -716,9 +868,76 @@ def plot_rr_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], vline_p
     for h in hline_pos : 
         ax.axhline(h,0,1, c="white", lw=0.5)
     
-    ax.set_xticklabels(model_list, fontdict={"fontfamily":"arial", "fontsize":10})
+    average_ranks = rr_array.shape[1] + 1 - np.mean(ordered_rr_rank_by_dataset, axis=0)
+    xticklabels = []
+    for model_name, avg_rank in zip(model_list, average_ranks) :
+        xticklabels.append(f"{model_name}\n({round(avg_rank, 1)})")
+    ax.set_xticklabels(xticklabels, fontdict={"fontfamily":"arial", "fontsize":10})
+    # ax.set_xticklabels(model_list, fontdict={"fontfamily":"arial", "fontsize":10})
     ax.set_yticklabels(dataset_list, fontdict={"fontfamily":"arial", "fontsize":10}, rotation=0)
     ax.set_xlabel("Models", fontdict={"fontfamily":"arial", "fontsize":12})
     ax.set_ylabel("Datasets", fontdict={"fontfamily":"arial", "fontsize":12})
+    if type(save) == str:
+        plt.savefig(f"figures/{save}", dpi=300, format="svg")
+
+
+def plot_std_kde_plot(df_to_plot, model_order, h=0.3, aspect=10, xlim=(-0.05,0.2), xticks=[0, 0.05, 0.10, 0.15], save=False):
+    """ Plots kde plots of how the standard deviations of MRR across different masks.
+    
+    Parameters
+    ----------
+    df_to_plot : pd.DataFrame object.
+        Result dataframe to plot. Must have "std" as the name of column with std values.
+    model_order : list of str.
+        The order of models to use from top to bottom.
+    h : float
+        Height of the plot in inches
+    aspect : float
+        h*aspect is the width of the plot in inches
+    xlim : tuple(float, float)
+        The both ends of the x axis
+    save : False or str
+        if str, filename to save.
+    """
+    import warnings
+    warnings.filterwarnings('ignore')
+    pal = sns.cubehelix_palette(4, rot=-.25, light=.7)
+    g = sns.FacetGrid(
+        df_to_plot, row="model", hue="model", 
+        aspect=aspect, height=h, palette=pal, row_order=model_order, xlim=xlim
+    )
+
+    # Draw the densities in a few steps
+    g.map(sns.kdeplot, "std",
+        bw_adjust=.5, clip_on=False,
+        fill=True, alpha=1, linewidth=0.5)
+    g.map(sns.kdeplot, "std", clip_on=False, color="w", lw=0.5, bw_adjust=.5)
+
+    # passing color=None to refline() uses the hue mapping
+    g.refline(y=0, linewidth=0.5, linestyle="-", color=None, clip_on=False)
+
+    # Define and use a simple function to label the plot in axes coordinates
+    def label(x, color, label):
+        ax = plt.gca()
+        ax.text(
+            0, .4, label, color=color, #fontweight="bold", 
+            ha="left", va="center", transform=ax.transAxes,
+            fontname="arial", fontsize=10
+        )
+
+    g.map(label, "std", label="Standard deviation")
+
+    # Set the subplots to overlap
+    g.figure.subplots_adjust(hspace=.05)
+
+    # Remove axes details that don't play well with overlap
+    g.set_titles("")
+    g.set(yticks=[], ylabel="")
+    g.set(xticks=xticks)
+    g.despine(bottom=True, left=True)
+    plt.xticks(fontname="arial", fontsize=8)
+    plt.xlabel("Standard deviation", fontname="arial", fontsize=10)
+
+
     if type(save) == str:
         plt.savefig(f"figures/{save}", dpi=300, format="svg")
