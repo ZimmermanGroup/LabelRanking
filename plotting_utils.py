@@ -22,17 +22,17 @@ class Analyzer():
         self.models = models
         self.n_rem_rxns = n_rem_rxns
         if self.n_rem_rxns == 0 :
-            filename_appendix = ".xlsx"
+            self._filename_appendix = ".xlsx"
         else :
-            filename_appendix = f"_rem{self.n_rem_rxns}rxns.xlsx"
+            self._filename_appendix = f"_rem{self.n_rem_rxns}rxns.xlsx"
         # Loading the datasets
-        self.deoxy_perf_df = pd.read_excel(f"performance_excels/deoxy/{self.feature}_base_None"+filename_appendix)
-        self.amine_perf_df = pd.read_excel(f"performance_excels/natureHTE/{self.feature}_amine_None"+filename_appendix)
-        self.amide_perf_df = pd.read_excel(f"performance_excels/natureHTE/{self.feature}_amide_None"+filename_appendix)
-        self.sulfon_perf_df = pd.read_excel(f"performance_excels/natureHTE/{self.feature}_sulfonamide_None"+filename_appendix)
-        self.thiol_perf_df = pd.read_excel(f"performance_excels/natureHTE/{self.feature}_thiol_None"+filename_appendix)
-        self.whole_amine_perf_df = pd.read_excel(f"performance_excels/scienceMALDI/{self.feature}_whole_amine_None"+filename_appendix)
-        self.whole_bromide_perf_df = pd.read_excel(f"performance_excels/scienceMALDI/{self.feature}_whole_bromide_None"+filename_appendix)
+        self.deoxy_perf_df = pd.read_excel(f"performance_excels/deoxy/{self.feature}_base_None"+self._filename_appendix)
+        self.amine_perf_df = pd.read_excel(f"performance_excels/natureHTE/{self.feature}_amine_None"+self._filename_appendix)
+        self.amide_perf_df = pd.read_excel(f"performance_excels/natureHTE/{self.feature}_amide_None"+self._filename_appendix)
+        self.sulfon_perf_df = pd.read_excel(f"performance_excels/natureHTE/{self.feature}_sulfonamide_None"+self._filename_appendix)
+        self.thiol_perf_df = pd.read_excel(f"performance_excels/natureHTE/{self.feature}_thiol_None"+self._filename_appendix)
+        self.whole_amine_perf_df = pd.read_excel(f"performance_excels/scienceMALDI/{self.feature}_whole_amine_None"+self._filename_appendix)
+        self.whole_bromide_perf_df = pd.read_excel(f"performance_excels/scienceMALDI/{self.feature}_whole_bromide_None"+self._filename_appendix)
 
     def _get_different_sf_index_for_deoxy(self, deoxy_df):
         """ Result files of deoxyfluorination datasets consist of the 5 different sulfonyl fluorides altogether.
@@ -41,7 +41,7 @@ class Analyzer():
         Parameters
         ----------
         deoxy_df : pd.DataFrame
-            result datafrmae of deoxy dataset.
+            result dataframe of deoxy dataset.
         
         Returns
         -------
@@ -99,6 +99,77 @@ class Analyzer():
 
         self._avg_perf_df = pd.DataFrame(avg_perf_dict)
         return self._avg_perf_df
+    
+
+class MoreConditionAnalyzer(Analyzer):
+    """ Used to analyze the results from datasets with more than 10 reaction conditions to choose from."""
+    def __init__(self, feature, models, n_rem_rxns=0) :
+        """ 
+        Parameters
+        ----------
+        n_rem_rxns : int or list
+            if list, we assume that the order is in informer, ullmann and borylation.
+        """
+        if type(n_rem_rxns) == int :
+            super().__init__(feature, models, n_rem_rxns)
+        else : 
+            super().__init__(feature, models, 0)
+        if self.feature == "fp" : n = 3
+        elif self.feature == "desc" : n = 2
+        if type(n_rem_rxns) == int:
+            appendix = [self._filename_appendix] * n
+        elif type(n_rem_rxns) == list :
+            appendix = [f"_rem{x}rxns.xlsx" for x in n_rem_rxns]
+            
+        # Loading the datasets
+        self.informer_perf_df = pd.read_excel(F"performance_excels/informer/{self.feature}_catalyst_ratio_None"+appendix[0])
+        self.ullmann_perf_df = pd.read_excel(F"performance_excels/ullmann/{self.feature}_None_None"+appendix[1])
+        if self.feature == "fp" :
+            self.boryl_perf_df = pd.read_excel(F"performance_excels/borylation/{self.feature}_None_None"+appendix[2])
+        
+    def _get_different_amine_ratio_index_for_informer(self, informer_df) :
+        """Result files of informer datasets consist of 2 different amine_ratio values combined.
+        Finds the indices where results of a new amine_ratio starts.
+        
+        Parameters
+        ----------
+        informer_df : pd.DataFrame
+            result dataframe of informer dataset.
+        
+        Returns
+        -------
+        new_comp_starts_at : int
+            Index where the results using the new sub-dataset starts at.
+        """
+        rfr_inds = informer_df[informer_df["model"] == "RFR"].index.tolist()
+        for i, ind in enumerate(rfr_inds) :
+            if i > 0 :
+                if ind - rfr_inds[i-1] > 1 :
+                    new_comp_starts_at = ind
+                    break
+        return new_comp_starts_at
+    
+    @property
+    def avg_perf_df(self) :
+        """ Collects all results into one dataframe."""
+        avg_perf_dict = {
+            "model":[],
+            "dataset":[],
+            "average reciprocal rank":[],
+            "average kendall tau":[],
+        }
+        divider = self._get_different_amine_ratio_index_for_informer(self.informer_perf_df)
+        dfs = [self.informer_perf_df.iloc[:divider], self.informer_perf_df.iloc[divider:]] + [self.ullmann_perf_df]
+        names = ["Informer 1", "Informer 2", "Ullmann"]
+        if self.feature == "fp" :
+            dfs += [self.boryl_perf_df]
+            names += ["Borylation"]
+        for df, name in zip(dfs, names):
+            for model in self.models :
+                self._update_perf_dict(avg_perf_dict, df, model, name)
+        self._avg_perf_df = pd.DataFrame(avg_perf_dict)
+        return self._avg_perf_df
+
 
 def get_rr_kt_tables(avg_perf_df, ordered_cols):
     """ Separated out from the analyzer because arrays from fingerprints need to be combined with descriptors in some cases."""
@@ -435,12 +506,12 @@ def AL_trellis(df_to_plot, rpc_df, rfr_df, ymin, ymax):
     plt.show()
 
 
-def AL_average(df_to_plot, rpc_df, rfr_df, xmin, xmax):
+def AL_average(df_to_plot, rpc_df, rfr_df, xmin, xmax, score="Reciprocal Rank"):
     fig, ax = plt.subplots()
     sns.lineplot(
         df_to_plot,
         x="Substrates Sampled",
-        y="Reciprocal Rank",
+        y=score,
         hue="Strategy",
         style="Strategy",
         markers=True,
@@ -448,7 +519,7 @@ def AL_average(df_to_plot, rpc_df, rfr_df, xmin, xmax):
     )
     ax.plot(
         np.arange(xmin, xmax + 1),
-        [rpc_df["Reciprocal Rank"].mean()] * (xmax + 1 - xmin),
+        [rpc_df[score].mean()] * (xmax + 1 - xmin),
         color="orange",
         alpha=0.7,
         ls="--",
@@ -456,7 +527,7 @@ def AL_average(df_to_plot, rpc_df, rfr_df, xmin, xmax):
     if rfr_df is not None:
         ax.plot(
             np.arange(xmin, xmax + 1),
-            [rfr_df["Reciprocal Rank"].mean()] * (xmax + 1 - xmin),
+            [rfr_df[score].mean()] * (xmax + 1 - xmin),
             color="grey",
             alpha=0.7,
             ls="--",

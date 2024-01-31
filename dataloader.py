@@ -659,8 +659,44 @@ class InformerDataset(Dataset):
         return self._X_fp
 
     @property
-    def X_desc(self, fpSize=1024, radius=3):
-        return self.X_fp(fpSize=fpSize, radius=radius)
+    def X_desc(self):
+        substrate_desc = pd.read_excel("datasets/Informer.xlsx", sheet_name="substrate_descriptors").to_numpy()[:, 1:]
+        if self.for_regressor :
+            if self.component_to_rank == "amine_ratio" :
+                other_array = np.hstack(
+                    (self.desc[:, :3], self.desc[:, -1].reshape(-1, 1))
+                )
+            elif self.component_to_rank == "catalyst_ratio" :
+                other_array = self.desc[:, :4]
+        else :
+            if self.component_to_rank == "amine_ratio" :
+                other_array = np.repeat(
+                    self.desc[:4, :-1], 11, axis=0
+                )
+            elif self.component_to_rank == "catalyst_ratio":
+                    other_array = np.repeat(
+                        np.vstack(
+                            tuple(
+                                [
+                                    row
+                                    for i, row in enumerate(
+                                        np.hstack(
+                                            (
+                                                self.desc[:8, :3],
+                                                self.desc[:8, -1].reshape(-1, 1),
+                                            )
+                                        )
+                                    )
+                                    if i % 4 == 0
+                                ]
+                            )
+                        ),
+                        11,
+                        axis=0,
+                    )
+        self._X_desc = self._split_arrays(substrate_desc, other_array)
+        print("X DESC ARRAY SHAPE", self._X_desc[0].shape)
+        return self._X_desc
 
     @property
     def X_onehot(self):
