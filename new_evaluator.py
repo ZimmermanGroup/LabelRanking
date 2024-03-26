@@ -39,12 +39,13 @@ class Evaluator(ABC):
         Number of evaluations to conduct.
     """
 
-    def __init__(self, dataset, n_rxns, outer_cv, n_rxns_to_erase=0, n_evaluations=1):
+    def __init__(self, dataset, n_rxns, outer_cv, n_rxns_to_erase=0, n_evaluations=1, use_all_conditions=False):
         self.dataset = dataset
         self.n_rxns = n_rxns
         self.outer_cv = outer_cv
         self.n_rxns_to_erase = n_rxns_to_erase
         self.n_evaluations = n_evaluations
+        self.use_all_conditions = use_all_conditions # only when n_rxns_to_erase > 0 and specified.
         if self.n_rxns_to_erase >= 1 :
             np.random.seed(42)
 
@@ -306,70 +307,106 @@ class Evaluator(ABC):
             print("CV FOLD", a)
             for eval_loop_num in range(self.n_evaluations):
                 print("EVALUATION #", eval_loop_num)
+                print("USE ALL CONDS?", self.use_all_conditions)
                 if self.n_rxns_to_erase >= 1:
-                    ### Deciding which reactions to mask out for this evaluation loop in the format of ranking arrays.
-                    if self.dataset.for_regressor :
-                        shape = (len(train_ind)//self.dataset.n_rank_component, self.dataset.n_rank_component)
-                    else:
-                        shape = (len(train_ind), self.dataset.n_rank_component)
-                    random_numbers = np.random.rand(shape[0], shape[1])
-                    inds_to_erase = (
-                        np.repeat(np.arange(shape[0]), self.n_rxns_to_erase).flatten(),
-                        np.argpartition(random_numbers, kth=self.n_rxns_to_erase, axis=1)[
-                            :, : self.n_rxns_to_erase
-                        ].flatten(),
-                    )
-                    print("INDS TO ERASE", inds_to_erase)
-                    # Need this block again so that we use the original arrays for different evaluations.
-                    if X is not None:
-                        X_train = std.transform(X[train_ind, :])
-                    y_train, y_test = y[train_ind], y[test_ind]
-                    # For regressors
-                    if type(self) == RegressorEvaluator:
-                        inds_to_remove = []
-                        inds_to_remove.extend(
-                            [
-                                self.dataset.n_rank_component * row_num + col_num
-                                for row_num, col_num in zip(
-                                    inds_to_erase[0], inds_to_erase[1]
-                                )
-                            ]
+                    if not self.use_all_conditions :
+                        ### Deciding which reactions to mask out for this evaluation loop in the format of ranking arrays.
+                        if self.dataset.for_regressor :
+                            shape = (len(train_ind)//self.dataset.n_rank_component, self.dataset.n_rank_component)
+                        else:
+                            shape = (len(train_ind), self.dataset.n_rank_component)
+                        random_numbers = np.random.rand(shape[0], shape[1])
+                        inds_to_erase = (
+                            np.repeat(np.arange(shape[0]), self.n_rxns_to_erase).flatten(),
+                            np.argpartition(random_numbers, kth=self.n_rxns_to_erase, axis=1)[
+                                :, : self.n_rxns_to_erase
+                            ].flatten(),
                         )
-                        inds_to_keep = [
-                            x for x in range(len(y_train)) if x not in inds_to_remove
-                        ]
-                        y_train = y_train[inds_to_keep]
-                        X_train = X_train[inds_to_keep]
-                    elif type(self) == MulticlassEvaluator:
-                        y_train_missing = deepcopy(y_yield_train).astype(float)
-                        y_train_missing[inds_to_erase] = np.nan
-                        y_train = np.nanargmax(y_train_missing, axis=1)
-                    # For label ranking
-                    else:
-                        y_train_missing = deepcopy(y_train).astype(float)
-                        y_train_missing[inds_to_erase] = np.nan
-                        if type(self) == LabelRankingEvaluator:
-                            y_train = mstats.rankdata(
-                                np.ma.masked_invalid(y_train_missing), axis=1
+                        print("INDS TO ERASE", inds_to_erase)
+                        # Need this block again so that we use the original arrays for different evaluations.
+                        if X is not None:
+                            X_train = std.transform(X[train_ind, :])
+                        y_train, y_test = y[train_ind], y[test_ind]
+
+                        # For regressors
+                        if type(self) == RegressorEvaluator:
+                            inds_to_remove = []
+                            inds_to_remove.extend(
+                                [
+                                    self.dataset.n_rank_component * row_num + col_num
+                                    for row_num, col_num in zip(
+                                        inds_to_erase[0], inds_to_erase[1]
+                                    )
+                                ]
                             )
-                            y_train[y_train == 0] = np.nan
-                            # print("YTRAIN", y_train_missing)
-                        elif type(self) == BaselineEvaluator:
-                            y_train = np.nanmean(y_train_missing, axis=0)
-                            X_train = y_train
-                            X_test = y_train_missing
-                        elif type(self) == MultilabelEvaluator:
-                            y_yield_train = y_yield[train_ind]
+                            inds_to_keep = [
+                                x for x in range(len(y_train)) if x not in inds_to_remove
+                            ]
+                            y_train = y_train[inds_to_keep]
+                            X_train = X_train[inds_to_keep]
+                        elif type(self) == MulticlassEvaluator:
                             y_train_missing = deepcopy(y_yield_train).astype(float)
                             y_train_missing[inds_to_erase] = np.nan
-                            # print("YTRAIN", y_train_missing)
-                            nonzero_inds = np.argpartition(
-                                -1 * y_train_missing, self.n_rxns, axis=1
-                            )[:, : self.n_rxns]
-                            y_train = np.zeros_like(y_train_missing)
-                            for row_num, col_nums in enumerate(nonzero_inds):
-                                y_train[np.array([row_num] * self.n_rxns), col_nums] = 1
-                            # print("MULTILABEL YTRAIN", y_train)
+                            y_train = np.nanargmax(y_train_missing, axis=1)
+                        # For label ranking
+                        else:
+                            y_train_missing = deepcopy(y_train).astype(float)
+                            y_train_missing[inds_to_erase] = np.nan
+                            if type(self) == LabelRankingEvaluator:
+                                y_train = mstats.rankdata(
+                                    np.ma.masked_invalid(y_train_missing), axis=1
+                                )
+                                y_train[y_train == 0] = np.nan
+                                # print("YTRAIN", y_train_missing)
+                            elif type(self) == BaselineEvaluator:
+                                y_train = np.nanmean(y_train_missing, axis=0)
+                                X_train = y_train
+                                X_test = y_train_missing
+                            elif type(self) == MultilabelEvaluator:
+                                y_yield_train = y_yield[train_ind]
+                                y_train_missing = deepcopy(y_yield_train).astype(float)
+                                y_train_missing[inds_to_erase] = np.nan
+                                # print("YTRAIN", y_train_missing)
+                                nonzero_inds = np.argpartition(
+                                    -1 * y_train_missing, self.n_rxns, axis=1
+                                )[:, : self.n_rxns]
+                                y_train = np.zeros_like(y_train_missing)
+                                for row_num, col_nums in enumerate(nonzero_inds):
+                                    y_train[np.array([row_num] * self.n_rxns), col_nums] = 1
+                                # print("MULTILABEL YTRAIN", y_train)
+                    else :
+                        print("COMES IN HERE")
+                        if self.dataset.for_regressor :
+                            shape = (len(train_ind)//self.dataset.n_rank_component, self.dataset.n_rank_component)
+                        else:
+                            shape = (len(train_ind), self.dataset.n_rank_component)
+                        n_subs_to_choose = int(shape[0]*(1-(self.n_rxns_to_erase/shape[1])))
+                        inds_chosen = np.random.choice(shape[0], n_subs_to_choose, replace=False)
+                        if X is not None:
+                            X_train = std.transform(X[train_ind, :])
+                        y_train, y_test = y[train_ind], y[test_ind]
+                        print("ORIGINAL ARRAY SHAPE", y_train.shape)
+                        print("INDS CHOSEN", inds_chosen)
+                        if type(self) == RegressorEvaluator:
+                            inds_to_keep = []
+                            for start_row in inds_chosen : 
+                                inds_to_keep.extend(
+                                    [
+                                        shape[1] * start_row + col_num
+                                        for col_num in range(shape[1])
+                                    ]
+                                )
+                            y_train = y_train[inds_to_keep]
+                            X_train = X_train[inds_to_keep]
+                        else :
+                            y_train = y_train[inds_chosen]
+                            if type(self) == BaselineEvaluator:
+                                y_train = np.nanmean(y_train, axis=0)
+                                X_train = y_train
+                            else : 
+                                X_train = X_train[inds_chosen]
+                        print("FULL CONDITION, NUM SUBS:", X_train.shape, y_train.shape)
+                        
 
                 for b, (model, model_name) in enumerate(
                     zip(self.list_of_algorithms, self.list_of_names)
@@ -470,8 +507,8 @@ class BaselineEvaluator(Evaluator):
         Records of model performances, measured by rr, mrr, regret and kendall tau, over each test compound.
     """
 
-    def __init__(self, dataset, n_rxns, outer_cv, n_rxns_to_erase=0, n_evaluations=1):
-        super().__init__(dataset, n_rxns, outer_cv, n_rxns_to_erase, n_evaluations)
+    def __init__(self, dataset, n_rxns, outer_cv, n_rxns_to_erase=0, n_evaluations=1, use_all_conditions=False):
+        super().__init__(dataset, n_rxns, outer_cv, n_rxns_to_erase, n_evaluations, use_all_conditions)
         self.list_of_algorithms = ["Baseline"]
         self.list_of_names = ["Baseline"]
 
@@ -545,8 +582,9 @@ class MulticlassEvaluator(Evaluator):
         outer_cv,
         n_rxns_to_erase=0,
         n_evaluations=1,
+        use_all_conditions=False
     ):
-        super().__init__(dataset, n_rxns, outer_cv, n_rxns_to_erase, n_evaluations)
+        super().__init__(dataset, n_rxns, outer_cv, n_rxns_to_erase, n_evaluations, use_all_conditions)
         self.feature_type = feature_type
         self.list_of_names = list_of_names
         self.list_of_algorithms = []
@@ -739,6 +777,7 @@ class MultilabelEvaluator(MulticlassEvaluator):
         outer_cv,
         n_rxns_to_erase=0,
         n_evaluations=1,
+        use_all_conditions=False
     ):
         super().__init__(
             dataset,
@@ -748,6 +787,7 @@ class MultilabelEvaluator(MulticlassEvaluator):
             outer_cv,
             n_rxns_to_erase,
             n_evaluations,
+            use_all_conditions
         )
 
         self.list_of_algorithms = []
@@ -909,8 +949,9 @@ class LabelRankingEvaluator(Evaluator):
         outer_cv,
         n_rxns_to_erase=0,
         n_evaluations=1,
+        use_all_conditions=False
     ):
-        super().__init__(dataset, n_rxns, outer_cv, n_rxns_to_erase, n_evaluations)
+        super().__init__(dataset, n_rxns, outer_cv, n_rxns_to_erase, n_evaluations, use_all_conditions)
         self.feature_type = feature_type
         self.list_of_algorithms = list_of_algorithms
         self.list_of_names = list_of_names
@@ -1020,9 +1061,10 @@ class RegressorEvaluator(Evaluator):
         outer_cv,
         n_rxns_to_erase=0,
         n_evaluations=1,
+        use_all_conditions=False
     ):
         super().__init__(
-            regressor_dataset, n_rxns, outer_cv, n_rxns_to_erase, n_evaluations
+            regressor_dataset, n_rxns, outer_cv, n_rxns_to_erase, n_evaluations, use_all_conditions
         )
         self.feature_type = feature_type
         self.list_of_algorithms = list_of_algorithms

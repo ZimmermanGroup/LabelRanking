@@ -71,6 +71,11 @@ def parse_args():
         help="Number of reactions missing from each substrate.",
     )
     parser.add_argument(
+        "--all_conditions",
+        action="store_true",
+        help="If n_missing_reaction > 0, by specifying this keyword as true triggers the training dataset to be randomly selected substrates with all reaction conditions."
+    )
+    parser.add_argument(
         "-s",
         "--save",
         action="store_true",
@@ -359,6 +364,7 @@ def run_evaluation(parser):
     ## Preparing CV splits
     inner_ps = 4
     if not multidataset :
+        # FP only for CV purposes. Feature actually used is determined by parser.feature as in second argument of Evaluator()
         outer_ps_array, outer_ps = prepare_stratified_kfold_by_top_condition(ranking_dataset.X_fp, ranking_dataset.y_ranking, n_outer_splits)
     else :
         outer_ps_array = []
@@ -395,13 +401,14 @@ def run_evaluation(parser):
             rfr_ps,
             parser.n_missing_reaction,
             n_evals,
+            use_all_conditions=parser.all_conditions
         ).train_and_evaluate_models()
         perf_dicts.append(evaluator.perf_dict)
     
     if parser.baseline or len(lr_algorithms) > 0 or len(classifiers) > 0:
         if parser.baseline:
             baseline_evaluator = BaselineEvaluator(
-                ranking_dataset, n_rxns, outer_ps, parser.n_missing_reaction, n_evals
+                ranking_dataset, n_rxns, outer_ps, parser.n_missing_reaction, n_evals, use_all_conditions=parser.all_conditions
             )
             baseline_CV = baseline_evaluator.train_and_evaluate_models()
             perf_dicts.append(baseline_CV.perf_dict)
@@ -418,6 +425,7 @@ def run_evaluation(parser):
                 outer_ps,
                 parser.n_missing_reaction,
                 n_evals,
+                use_all_conditions=parser.all_conditions
             )
             label_ranking_CV = label_ranking_evaluator.train_and_evaluate_models()
             perf_dicts.append(label_ranking_CV.perf_dict)
@@ -432,6 +440,7 @@ def run_evaluation(parser):
                     outer_ps,
                     parser.n_missing_reaction,
                     n_evals,
+                    use_all_conditions=parser.all_conditions
                 ).train_and_evaluate_models()
                 classifier_CV = classifier_evaluator.train_and_evaluate_models()
                 perf_dicts.append(classifier_CV.perf_dict)
@@ -444,6 +453,7 @@ def run_evaluation(parser):
                     outer_ps,
                     parser.n_missing_reaction,
                     n_evals,
+                    use_all_conditions=parser.all_conditions
                 ).train_and_evaluate_models()
                 classifier_CV = classifier_evaluator.train_and_evaluate_models()
                 perf_dicts.append(classifier_CV.perf_dict)
@@ -502,9 +512,11 @@ def parse_perf_dicts(parser, perf_dicts):
             comp = parser.label_component[0]
         elif len(parser.label_component) == 2:
             comp = "both"
+
         if parser.n_missing_reaction == 0:
             filename = f"performance_excels/{parser.dataset}/{parser.feature}_{comp}_{parser.train_together}.xlsx"
-            
+        elif parser.all_conditions:
+            filename = f"performance_excels/{parser.dataset}/{parser.feature}_{comp}_{parser.train_together}_rem{parser.n_missing_reaction}rxns_ALLCONDS.xlsx"
         else:
             filename = f"performance_excels/{parser.dataset}/{parser.feature}_{comp}_{parser.train_together}_rem{parser.n_missing_reaction}rxns.xlsx"
         # To append to previously existing file

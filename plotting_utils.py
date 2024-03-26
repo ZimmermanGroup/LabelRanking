@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+from copy import deepcopy
 import seaborn as sns
 from scipy.stats.mstats import rankdata
 from scipy.stats import friedmanchisquare
@@ -854,6 +856,54 @@ def plot_rr_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], vline_p
     ax.set_yticklabels(dataset_list, fontdict={"fontfamily":"arial", "fontsize":10}, rotation=0)
     ax.set_xlabel("Models", fontdict={"fontfamily":"arial", "fontsize":12})
     ax.set_ylabel("Datasets", fontdict={"fontfamily":"arial", "fontsize":12})
+    if type(save) == str:
+        plt.savefig(f"figures/{save}", dpi=300, format="svg")
+
+
+def plot_table_with_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], vline_pos=[1,2,4], square=False, cbar_kws=None, save=False):
+    """ Makes a table with heatmap."""
+    ordered_rr_rank_by_dataset = rankdata(rr_array, axis=1)
+    max_in_each_row = np.argmax(ordered_rr_rank_by_dataset, axis=1)
+    second_in_each_row = np.argsort(ordered_rr_rank_by_dataset, axis=1)[:, -2]
+    average_ranks = [round(x,1) for x in rr_array.shape[1] + 1 - np.mean(ordered_rr_rank_by_dataset, axis=0)]
+    array_to_plot = np.vstack((ordered_rr_rank_by_dataset, average_ranks))
+    ax = sns.heatmap(
+        array_to_plot, #ordered_rr_rank_by_dataset, 
+        annot=np.vstack((rr_array, average_ranks)), 
+        fmt=".3f",
+        cbar=False, 
+        cmap=ListedColormap(["white"]), 
+        square=square,
+        annot_kws={"fontfamily":"arial", "fontsize":10}
+    )
+    ncols=len(model_list)
+    for row, col in enumerate(max_in_each_row) :
+        ax.texts[ncols*row + col].set_weight("bold")
+        ax.texts[ncols*row + col].set_color("green")
+    for row, col in enumerate(second_in_each_row) :
+        ax.texts[ncols*row + col].set_weight("bold")
+    ax.texts[ncols*row+ncols+np.argmin(average_ranks)].set_weight("bold")
+    ax.texts[ncols*row+ncols+np.argmin(average_ranks)].set_color("green")
+    ax.texts[ncols*row+ncols+np.argsort(average_ranks)[1]].set_weight("bold")
+    for t in ax.texts[8*row+8:] :
+        t.set_text(str(t.get_text())[:3])
+    
+    xticklabels = []
+    for model_name, avg_rank in zip(model_list, average_ranks) :
+        xticklabels.append(f"{model_name}")
+    yticklabels = deepcopy(dataset_list)
+    yticklabels.append("Average rank\nacross datasets")
+    ax.set_xticklabels(xticklabels, fontdict={"fontfamily":"arial", "fontsize":10})
+    ax.set_yticklabels(yticklabels, fontdict={"fontfamily":"arial", "fontsize":10}, rotation=0)
+    ax.set_xlabel("Models", fontdict={"fontfamily":"arial", "fontsize":12, "fontweight":"bold"})
+    ax.set_ylabel("Datasets", fontdict={"fontfamily":"arial", "fontsize":12, "fontweight":"bold"})
+    ax.xaxis.tick_top()
+    ax.xaxis.set_label_position('top')
+    for v in vline_pos :
+        ax.axvline(v,0,1, c="grey", lw=0.5)
+    for h in hline_pos : 
+        ax.axhline(h,0,1, c="grey", lw=0.5)
+    ax.axhline(11, 0, 1, c="black", lw=1.5)
     if type(save) == str:
         plt.savefig(f"figures/{save}", dpi=300, format="svg")
 
