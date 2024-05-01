@@ -1696,3 +1696,130 @@ class BorylationDataset(Dataset):
         assert np.all(np.sum(labels, axis=1) >= self.n_rxns)
         self._y_label = labels
         return self._y_label
+
+
+class ArylBorylationDataset(Dataset):
+    """
+    Prepares dataset on aryl halide borylation dataset prepared by BMS in Organometallics, 2022, 1847.
+    
+    """
+    def __init__(self, for_regressor, component_to_rank, n_rxns):
+        super().__init__(for_regressor, n_rxns)
+        self.component_to_rank = component_to_rank
+
+        # Reading in the raw dataset
+        rxn_df = pd.read_csv(
+            f"datasets/aryl_borylation/data_{self.component_to_rank}_Final.csv"
+        )
+        self.ligand_list = list(rxn_df["Ligand"].unique())
+        self.ligand_inchi = list(rxn_df["Ligand_inchi"].unique())
+        self.substrate_inchi = list(rxn_df["Electrophile_inchi"].unique())
+        self.substrate_list = [rxn_df[rxn_df["Electrophile_inchi"]==x]["Electrophile"].values[0] for x in self.substrate_inchi]
+        # print(self.substrate_list)
+        self.train_together = False
+        self.n_rank_component = len(self.ligand_list)
+
+        # Filling in the three missing reactions as 0% yields
+        yield_array = np.ones((len(self.substrate_list), len(self.ligand_list))) * -1
+        for i, row in rxn_df.iterrows():
+            elec = row["Electrophile"]
+            if elec == "4-Chloro-2-fluoroanisole" :
+                elec = "4-chloro-2-fluoro-1-methoxybenzene"
+            yield_array[self.substrate_list.index(elec), self.ligand_list.index(row["Ligand"])]  = row["Yield"]
+
+        need_to_add = np.where(yield_array < 0)
+        rows_to_add = []
+        for elec_ind, lig_ind in zip(*need_to_add) :
+            substrate = self.substrate_list[elec_ind]
+            ligand = self.ligand_list[lig_ind]
+            substrate_portion = rxn_df[rxn_df["Electrophile"]==substrate].iloc[0, :28]
+            ligand_portion = rxn_df[rxn_df["Ligand"]==ligand].iloc[0,28:-1] # we don't care about the produc and solvent inchi
+            rows_to_add.append(pd.concat([substrate_portion, ligand_portion, pd.Series({"Yield":0})]).to_frame().T)
+        self.rxn_df = pd.concat([rxn_df, *rows_to_add], ignore_index=True)
+        yield_array[yield_array < 0] = 0
+        self.yield_array = yield_array
+
+
+    @property
+    def X_fp(self, fpSize=1024, radius=3):
+        """
+        Prepares fingerprint arrays of substrates.
+        For regressors, fingerprints of ligands are appended.
+
+        Parameters
+        ----------
+        fpSize : int
+            Length of the Morgan FP.
+        radius : int
+            Radius of the Morgan FP.
+
+        Returns
+        -------
+        X_fp : np.ndarray of shape (n_rxns, n_features)
+            n_features depends on self.for_regressor
+        """
+        mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=fpSize)
+        fp_rows = []
+        if self.for_regressor:
+            for i, row in self.rxn_df.iterrows():
+                substrate_inchi = row["Electrophile_inchi"]
+                ligand_inchi = row["Ligand_inchi"]
+                fp_rows.append(
+                    np.concatenate(
+                        (
+                            mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromInchi(substrate_inchi)),
+                            mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromInchi(ligand_inchi))
+                        )
+                    ).reshape(1, -1)
+                )
+        else:
+            fp_rows = [mfpgen.GetCountFingerprintAsNumPy(Chem.MolFromInchi(x)).reshape(1,-1) for x in self.substrate_inchi]
+        self._X_fp = np.vstack(tuple(fp_rows))
+        return self._X_fp
+
+    @property
+    def X_desc(self):
+        """Prepares array of descriptors as prepared by the authors."""
+        if self.for_regressor :
+            self._X_desc = self.rxn_df.drop(['Electrophile_inchi', 'Solvent_inchi', 'Ligand_inchi', 'Product_inchi', 'Electrophile', 'Ligand', "Yield"], axis = 1).to_numpy()
+        else :
+            self._X_desc = np.unique(self.rxn_df.iloc[:, :26].to_numpy(dtype=np.float16), axis=0)
+        return self._X_desc
+
+    @property
+    def X_onehot(self):
+        "Prepares onehot arrays."
+        ohe = OneHotEncoder(handle_unknown="ignore")
+        if self.for_regressor :
+            self._X_onehot = ohe.fit_transform(self.rxn_df.loc[:, ["Electrophile", "Ligand"]])
+        else :
+            self._X_onehot = ohe.fit_transform(self.rxn_df.loc[:, "Electrophile"].to_numpy().reshape(-1,1))
+        return self._X_onehot
+
+    @property
+    def y_yield(self):
+        if self.for_regressor:
+            self._y_yield = self.rxn_df["Yield"].to_numpy().flatten()
+        else:
+            self._y_yield = self.yield_array
+        return self._y_yield
+
+    @property
+    def y_ranking(self):
+        self._y_ranking = yield_to_ranking(self.y_yield)
+        return self._y_ranking
+
+    @property
+    def y_label(self):
+        yields = self.y_yield
+        labels = np.zeros_like(yields)
+        nth_highest_yield = np.partition(yields, -1 * self.n_rxns, axis=1)[
+            :, -1 * self.n_rxns
+        ]
+        labels[
+            yields
+            >= np.hstack(tuple([nth_highest_yield.reshape(-1, 1)] * yields.shape[1]))
+        ] = 1
+        assert np.all(np.sum(labels, axis=1) >= self.n_rxns)
+        self._y_label = labels
+        return self._y_label

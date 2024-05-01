@@ -594,6 +594,7 @@ class MulticlassEvaluator(Evaluator):
             dataloader.ScienceDataset,
             dataloader.UllmannDataset,
             dataloader.BorylationDataset,
+            dataloader.ArylBorylationDataset
         ]:
             cv = 4
         elif type(self.dataset) == dataloader.NatureDataset:
@@ -854,17 +855,20 @@ class MultilabelEvaluator(MulticlassEvaluator):
                 pred_proba = model.predict_proba(X_test.reshape(1,-1))
             else :
                 pred_proba = model.predict_proba(X_test)
-        print("PRED PROBA SHAPE", pred_proba)
+        # print("PRED PROBA SHAPE", pred_proba)
         if self.dataset.train_together or type(self.dataset) in [
             dataloader.UllmannDataset,
             dataloader.BorylationDataset,
+            dataloader.ArylBorylationDataset
         ]:
             arrays_to_stack = []
-            for proba_array in pred_proba:
+            predict_array = model.predict(X_test)
+            for i, proba_array in enumerate(pred_proba):
                 if proba_array.shape[1] > 1:
                     arrays_to_stack.append(proba_array[:, 1].reshape(-1, 1))
                 elif proba_array.shape[0] > 1:
-                    arrays_to_stack.append(proba_array.flatten().reshape(-1, 1))
+                    arrays_to_stack.append(predict_array[:, i].reshape(-1,1))
+                    # arrays_to_stack.append(proba_array.flatten().reshape(-1, 1))
                 else:
                     assert len(proba_array.flatten()) == 1
                     arrays_to_stack.append(
@@ -1076,13 +1080,16 @@ class RegressorEvaluator(Evaluator):
             dataloader.BorylationDataset,
             dataloader.NatureDataset,
             dataloader.ScienceDataset,
-            dataloader.DeoxyDataset
+            dataloader.DeoxyDataset,
+            dataloader.ArylBorylationDataset
         ]:
             n_conds = self.dataset.n_rank_component
             y_test_reshape = y_test.reshape((len(y_test) // n_conds, n_conds))
             pred_rank_reshape = yield_to_ranking(
                 model.predict(X_test).reshape((len(X_test) // n_conds, n_conds))
             )
+        # elif type(self.dataset) == :
+        #     print(y_test.shape)
         elif type(self.dataset) == dataloader.InformerDataset:
             y_test_reshape = y_test.flatten()
             pred_rank_reshape = yield_to_ranking(model.predict(X_test).flatten())

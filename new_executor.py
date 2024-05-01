@@ -15,7 +15,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Specify the evaluation to run.")
     parser.add_argument(
         "--dataset",
-        help="Which dataset to use. Should be either 'deoxy', 'natureHTE', 'scienceMALDI', 'informer', 'ullmann', 'borylation'.",
+        help="Which dataset to use. Should be either 'deoxy', 'natureHTE', 'scienceMALDI', 'informer', 'ullmann', 'borylation', 'arylborylation'.",
     )
     parser.add_argument(
         "--feature",
@@ -145,9 +145,11 @@ def prepare_stratified_kfold_by_top_condition(X, y_ranking, n_splits):
             nonzero_rows.append(i)
             top_condition.append(np.argmin(row))
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    # print(X.shape, y_ranking.shape)
     outer_ps_array = -1 * np.ones(X.shape[0])
     for fold, (_, test) in enumerate(skf.split(X[nonzero_rows], top_condition)):
         outer_ps_array[test] = fold
+    print("OUTER PS ARRAY", outer_ps_array)
     outer_ps = PredefinedSplit(outer_ps_array)
     return outer_ps_array, outer_ps
 
@@ -192,21 +194,21 @@ def lr_names_to_model_objs(lr_names, inner_ps):
             param_grid={
                 "n_estimators": [25, 50, 100],
                 "max_depth": [4, 6, 8],
-            },  # 25,,100  4,6,
+            },
             scoring=kt_score,
             cv=inner_ps,
             n_jobs=-1,
         ),
         "IBM": GridSearchCV(
             IBLR_M(),
-            param_grid={"n_neighbors": [3, 5, 10]},  # ,5,10
+            param_grid={"n_neighbors": [3, 5, 10]},
             scoring=kt_score,
             cv=inner_ps,
             n_jobs=-1,
         ),
         "IBPL": GridSearchCV(
             IBLR_PL(),
-            param_grid={"n_neighbors": [3, 5, 10]},  # ,5,10
+            param_grid={"n_neighbors": [3, 5, 10]},
             scoring=kt_score,
             cv=inner_ps,
             n_jobs=-1,
@@ -354,6 +356,10 @@ def run_evaluation(parser):
         n_rxns = 3
         n_outer_splits = 5
         ranking_dataset, regressor_dataset = BorylationDataset(False, n_rxns), BorylationDataset(True, n_rxns)
+    elif parser.dataset == "aryl_borylation":
+        n_rxns = 4
+        n_outer_splits = 5
+        ranking_dataset, regressor_dataset = ArylBorylationDataset(False, label_component, n_rxns), ArylBorylationDataset(True, label_component, n_rxns)
 
     if parser.n_missing_reaction > 0:
         n_evals = N_EVALS
@@ -374,10 +380,19 @@ def run_evaluation(parser):
             outer_ps_array.append(a)
             outer_ps.append(b)
         
-
     if parser.rfr :
-        if type(outer_ps_array) == np.ndarray :
+        if type(outer_ps_array) == np.ndarray and parser.dataset != "aryl_borylation":
             rfr_ps = PredefinedSplit(np.repeat(outer_ps_array, ranking_dataset.y_ranking.shape[1]))
+        elif type(outer_ps_array) == np.ndarray and parser.dataset == "aryl_borylation":
+            # The dataset is not organized properly
+            rfr_ps = -1 * np.ones(regressor_dataset.rxn_df.shape[0])
+            for i, row in regressor_dataset.rxn_df.iterrows():
+                elec = row["Electrophile"]
+                if elec.lower() == "4-chloro-2-fluoroanisole" :
+                    elec = "4-chloro-2-fluoro-1-methoxybenzene"
+                rfr_ps[i] = outer_ps_array[regressor_dataset.substrate_list.index(elec)]
+            rfr_ps = PredefinedSplit(rfr_ps)
+            
         elif type(outer_ps_array) == list :
             rfr_ps = [PredefinedSplit(np.repeat(x, ranking_dataset.n_rank_component)) for x in outer_ps_array]
             
@@ -457,7 +472,6 @@ def run_evaluation(parser):
                 ).train_and_evaluate_models()
                 classifier_CV = classifier_evaluator.train_and_evaluate_models()
                 perf_dicts.append(classifier_CV.perf_dict)
-
     return perf_dicts
 
 
