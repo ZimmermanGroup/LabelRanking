@@ -105,7 +105,7 @@ class Analyzer():
 
 class MoreConditionAnalyzer(Analyzer):
     """ Used to analyze the results from datasets with more than 10 reaction conditions to choose from."""
-    def __init__(self, feature, models, n_rem_rxns=0) :
+    def __init__(self, feature, datasets, models, n_rem_rxns=0) :
         """ 
         Parameters
         ----------
@@ -122,13 +122,26 @@ class MoreConditionAnalyzer(Analyzer):
             appendix = [self._filename_appendix] * n
         elif type(n_rem_rxns) == list :
             appendix = [f"_rem{x}rxns.xlsx" for x in n_rem_rxns]
+        self.datasets = datasets
             
         # Loading the datasets
-        self.informer_perf_df = pd.read_excel(F"performance_excels/informer/{self.feature}_catalyst_ratio_None"+appendix[0])
-        self.ullmann_perf_df = pd.read_excel(F"performance_excels/ullmann/{self.feature}_None_None"+appendix[1])
-        if self.feature == "fp" :
-            self.boryl_perf_df = pd.read_excel(F"performance_excels/borylation/{self.feature}_None_None"+appendix[2])
-        
+        df_list = []
+        for i, dataset in enumerate(self.datasets) :
+            if dataset == "informer" :
+                df_list.append(pd.read_excel(f"performance_excels/informer/{self.feature}_catalyst_ratio_None"+appendix[0]))
+                self.informer_ind = i
+            elif dataset == "ullmann" :
+                df_list.append(pd.read_excel(f"performance_excels/ullmann/{self.feature}_None_None"+appendix[1]))
+            elif dataset == "borylation" :
+                df_list.append(pd.read_excel(f"performance_excels/borylation/{self.feature}_None_None"+appendix[2]))
+            elif dataset == "aryl_borylation":
+                meoh_df = pd.read_excel(f"performance_excels/aryl_borylation/desc_MeOH_None.xlsx")
+                etoh_df = pd.read_excel(f"performance_excels/aryl_borylation/desc_EtOH_None.xlsx")
+                df_list.append(meoh_df)
+                df_list.append(etoh_df)
+                self.datasets.insert(i+1, "aryl_borylation_etoh")
+        self.df_list = df_list
+
     def _get_different_amine_ratio_index_for_informer(self, informer_df) :
         """Result files of informer datasets consist of 2 different amine_ratio values combined.
         Finds the indices where results of a new amine_ratio starts.
@@ -160,12 +173,26 @@ class MoreConditionAnalyzer(Analyzer):
             "average reciprocal rank":[],
             "average kendall tau":[],
         }
-        divider = self._get_different_amine_ratio_index_for_informer(self.informer_perf_df)
-        dfs = [self.informer_perf_df.iloc[:divider], self.informer_perf_df.iloc[divider:]] + [self.ullmann_perf_df]
-        names = ["Informer 1", "Informer 2", "Ullmann"]
-        if self.feature == "fp" :
-            dfs += [self.boryl_perf_df]
-            names += ["Borylation"]
+        dfs = []
+        names = []
+        for name, df in zip(self.datasets, self.df_list) :
+            if name == "informer" :
+                divider = self._get_different_amine_ratio_index_for_informer(df)
+                dfs.extend([df.iloc[:divider], df.iloc[divider:]])
+                names.extend(["Informer 1", "Informer 2"])
+            elif name == "ullmann" :
+                dfs.append(df)
+                names.append("Ullmann")
+            elif name == "borylation" :
+                dfs.append(df)
+                names.append("Borylation")
+            elif "aryl_borylation" in name :
+                dfs.append(df)
+                if "etoh" in name :
+                    names.append("Aryl Borylation in EtOH")
+                else :
+                    names.append("Aryl Borylation in MeOH")
+     
         for df, name in zip(dfs, names):
             for model in self.models :
                 self._update_perf_dict(avg_perf_dict, df, model, name)
@@ -860,7 +887,7 @@ def plot_rr_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], vline_p
         plt.savefig(f"figures/{save}", dpi=300, format="svg")
 
 
-def plot_table_with_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], vline_pos=[1,2,4], square=False, cbar_kws=None, save=False):
+def plot_table_with_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], last_hline=11, vline_pos=[1,2,4], square=False, cbar_kws=None, save=False):
     """ Makes a table with heatmap."""
     ordered_rr_rank_by_dataset = rankdata(rr_array, axis=1)
     max_in_each_row = np.argmax(ordered_rr_rank_by_dataset, axis=1)
@@ -885,7 +912,7 @@ def plot_table_with_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9],
     ax.texts[ncols*row+ncols+np.argmin(average_ranks)].set_weight("bold")
     ax.texts[ncols*row+ncols+np.argmin(average_ranks)].set_color("green")
     ax.texts[ncols*row+ncols+np.argsort(average_ranks)[1]].set_weight("bold")
-    for t in ax.texts[8*row+8:] :
+    for t in ax.texts[ncols*row+ncols:] :
         t.set_text(str(t.get_text())[:3])
     
     xticklabels = []
@@ -903,7 +930,7 @@ def plot_table_with_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9],
         ax.axvline(v,0,1, c="grey", lw=0.5)
     for h in hline_pos : 
         ax.axhline(h,0,1, c="grey", lw=0.5)
-    ax.axhline(11, 0, 1, c="black", lw=1.5)
+    ax.axhline(last_hline, 0, 1, c="black", lw=1.5)
     if type(save) == str:
         plt.savefig(f"figures/{save}", dpi=300, format="svg")
 
