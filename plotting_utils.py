@@ -67,6 +67,9 @@ class Analyzer():
         dict_to_update["average kendall tau"].append(
             raw_df[raw_df["model"]==model_name]["kendall_tau"].mean()
         )
+        dict_to_update["regret"].append(
+            raw_df[raw_df["model"]==model_name]["regret"].mean()
+        )
 
     @property
     def avg_perf_df(self):
@@ -77,6 +80,7 @@ class Analyzer():
             "dataset":[],
             "average reciprocal rank":[],
             "average kendall tau":[],
+            "regret":[]
         }
         deoxy_start_inds = self._get_different_sf_index_for_deoxy(self.deoxy_perf_df)
         for i, start_ind in enumerate(deoxy_start_inds) :
@@ -172,6 +176,7 @@ class MoreConditionAnalyzer(Analyzer):
             "dataset":[],
             "average reciprocal rank":[],
             "average kendall tau":[],
+            "regret":[]
         }
         dfs = []
         names = []
@@ -887,17 +892,24 @@ def plot_rr_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], vline_p
         plt.savefig(f"figures/{save}", dpi=300, format="svg")
 
 
-def plot_table_with_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], last_hline=11, vline_pos=[1,2,4], square=False, cbar_kws=None, save=False):
+def plot_table_with_heatmap(rr_array, model_list, dataset_list, hline_pos=[5,9], last_hline=11, vline_pos=[1,2,4], square=False, cbar_kws=None, save=False, larger_is_better=True):
     """ Makes a table with heatmap."""
     ordered_rr_rank_by_dataset = rankdata(rr_array, axis=1)
-    max_in_each_row = np.argmax(ordered_rr_rank_by_dataset, axis=1)
-    second_in_each_row = np.argsort(ordered_rr_rank_by_dataset, axis=1)[:, -2]
-    average_ranks = [round(x,1) for x in rr_array.shape[1] + 1 - np.mean(ordered_rr_rank_by_dataset, axis=0)]
+    if larger_is_better :
+        max_in_each_row = np.argmax(ordered_rr_rank_by_dataset, axis=1)
+        second_in_each_row = np.argsort(ordered_rr_rank_by_dataset, axis=1)[:, -2]
+        fmt = ".3f"
+        average_ranks = [round(x,1) for x in rr_array.shape[1] + 1 - np.mean(ordered_rr_rank_by_dataset, axis=0)]
+    else :
+        max_in_each_row = np.argmin(ordered_rr_rank_by_dataset, axis=1)
+        second_in_each_row = np.argsort(ordered_rr_rank_by_dataset, axis=1)[:, 1]
+        fmt = ".1f"
+        average_ranks = [round(x,1) for x in np.mean(ordered_rr_rank_by_dataset, axis=0)]
     array_to_plot = np.vstack((ordered_rr_rank_by_dataset, average_ranks))
     ax = sns.heatmap(
-        array_to_plot, #ordered_rr_rank_by_dataset, 
+        array_to_plot,
         annot=np.vstack((rr_array, average_ranks)), 
-        fmt=".3f",
+        fmt=fmt,
         cbar=False, 
         cmap=ListedColormap(["white"]), 
         square=square,
