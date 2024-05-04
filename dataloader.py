@@ -115,7 +115,7 @@ class NatureDataset(Dataset):
         if self.component_to_rank == "amine":
             self.df = raw_data[raw_data["Chemistry"] == "Amine"]
             self.smiles_list = self.df["BB SMILES"].unique().tolist()
-            # Filtering out secondary amines
+            # Filtering out secondary amines - removes 35
             primary_amine_smiles = []
             for smiles in self.smiles_list :
                 mol = Chem.MolFromSmiles(smiles)
@@ -127,7 +127,7 @@ class NatureDataset(Dataset):
                             max_hydrogens = num_of_h
                 if max_hydrogens == 2 :
                     primary_amine_smiles.append(smiles)
-            # Filtering out cases where the top case is a tie between condition 0 and another one.
+            # Filtering out cases where the top case is a tie between condition 0 and another one. - removes 9 
             inds_to_remove_from_primary_amine_smiles = []
             for i, row in enumerate(self.df[self.df["BB SMILES"].isin(primary_amine_smiles)].iloc[:, -1].to_numpy().flatten().reshape(len(primary_amine_smiles),4)) :
                 if np.argmax(row) ==0 and len(np.unique(row)) != len(row) :
@@ -178,14 +178,16 @@ class NatureDataset(Dataset):
                 .to_numpy()
                 .reshape(48, 4)
             ):
-                if len(np.where(row == 100)[0]) <= 1 and np.nansum(row) > 0:
+                # if len(np.where(row == 100)[0]) <= 1 and np.nansum(row) > 0:
+                #     rows_to_keep.append(i)
+                if len(np.unique(row)) == len(row) :
                     rows_to_keep.append(i)
                 else:
                     self.validation_rows.append(i)
-            # Removing rows that bias toward a specific condition
-            further_remove = [23, 21, 9, 6]
-            for a in further_remove:
-                self.validation_rows.append(rows_to_keep.pop(a))
+            # # Removing rows that bias toward a specific condition
+            # further_remove = [23, 21, 9, 6]
+            # for a in further_remove:
+            #     self.validation_rows.append(rows_to_keep.pop(a))
         self.smiles_list = self.df["BB SMILES"].unique().tolist()
         self.cats = self.df["Catalyst"].unique().tolist()
         self.bases = self.df["Base"].unique().tolist()
@@ -1601,7 +1603,7 @@ class BorylationDataset(Dataset):
         partial_df = partial_df[
             partial_df["educt"] != "O=C(C=1C=CC=CC1)N(C(C)C)C(C)C"
         ]  # one datapoint missing
-        # Drop substrates that has at least three positives
+        # Keep only substrates that has at least three positives
         self.smiles_list = []
         for educt in partial_df["educt"].unique():
             if (
