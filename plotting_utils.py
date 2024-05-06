@@ -243,7 +243,7 @@ def run_friedman_tests(rr_Table, kt_table, models):
     )
     return rr_friedman_results.pvalue, kt_friedman_results.pvalue
 
-def plot_bonferroni_dunn(table, cols):
+def plot_bonferroni_dunn(table, cols, save):
     rank_by_dataset = table.shape[1] + 1 - rankdata(table, axis=1)
     bonferroni_dunn_test_results = sp.posthoc_dunn(
         table.unstack().reset_index(name="average rank"), 
@@ -259,6 +259,8 @@ def plot_bonferroni_dunn(table, cols):
         bonferroni_dunn_test_results, 
         label_props={"color":"k", "fontfamily":"arial", "fontsize":5}
     )
+    if type(save) == str:
+        plt.savefig(f"figures/{save}", dpi=300, format="svg")
 
 def prep_performance_by_model_dict(perf_excel_path):
     """Converts the excel file in the specified path to a dictionary of sub dataframes of each model.
