@@ -15,7 +15,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Specify the evaluation to run.")
     parser.add_argument(
         "--dataset",
-        help="Which dataset to use. Should be either 'deoxy', 'natureHTE', 'scienceMALDI', 'informer', 'ullmann', 'borylation', 'arylborylation'.",
+        help="Which dataset to use. Should be either 'deoxy', 'natureHTE', 'scienceMALDI', 'informer', 'ullmann', 'borylation', 'aryl_borylation'.",
     )
     parser.add_argument(
         "--feature",

@@ -98,7 +98,8 @@ class RPC(BaseEstimator):
                 # )
                 model = RandomForestClassifier(
                     n_estimators=self.n_estimators,
-                    max_depth=self.max_depth
+                    max_depth=self.max_depth,
+                    random_state=42
                 )
                 model.fit(sub_X, sub_preference)
                 self.learner_by_column_pair.update({column_combination: model})

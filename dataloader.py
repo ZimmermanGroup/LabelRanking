@@ -127,30 +127,32 @@ class NatureDataset(Dataset):
                             max_hydrogens = num_of_h
                 if max_hydrogens == 2 :
                     primary_amine_smiles.append(smiles)
-            # Filtering out cases where the top case is a tie between condition 0 and another one. - removes 9 
-            inds_to_remove_from_primary_amine_smiles = []
-            for i, row in enumerate(self.df[self.df["BB SMILES"].isin(primary_amine_smiles)].iloc[:, -1].to_numpy().flatten().reshape(len(primary_amine_smiles),4)) :
-                if np.argmax(row) ==0 and len(np.unique(row)) != len(row) :
-                    inds_to_remove_from_primary_amine_smiles.append(i)
-            self.smiles_to_keep = [item for i, item in enumerate(primary_amine_smiles) if i not in inds_to_remove_from_primary_amine_smiles]
-            # Randomly removing 17 cases where condition 0 is top-yielding
-            random_removal = [0, 1, 2, 3, 4, 5, 8, 9, 11, 12, 13, 15, 16, 17, 21, 22, 24] # the first array when you run np.random.seed(42) \n sorted(np.random.choice(27, size=17, replace=False))
-            counter = 0
-            inds_to_further_remove = []
-            temp_y_array = self.df[self.df["BB SMILES"].isin(self.smiles_to_keep)].iloc[:, -1].to_numpy().flatten().reshape(len(self.smiles_to_keep),4)
-            for i, row in enumerate(temp_y_array) :
-                if np.argmax(row) == 0  :
-                    if counter in random_removal :
-                        inds_to_further_remove.append(i)
-                    counter += 1
-            self.smiles_to_keep = [item for i, item in enumerate(self.smiles_to_keep) if i not in inds_to_further_remove]
-            temp_y_array = self.df[self.df["BB SMILES"].isin(self.smiles_to_keep)].iloc[:, -1].to_numpy().flatten().reshape(len(self.smiles_to_keep),4)
+            self.smiles_to_keep = deepcopy(primary_amine_smiles)
+            # # Filtering out cases where the top case is a tie between condition 0 and another one. - removes 9 
+            # inds_to_remove_from_primary_amine_smiles = []
+            # for i, row in enumerate(self.df[self.df["BB SMILES"].isin(primary_amine_smiles)].iloc[:, -1].to_numpy().flatten().reshape(len(primary_amine_smiles),4)) :
+            #     if np.argmax(row) ==0 and len(np.unique(row)) != len(row) :
+            #         inds_to_remove_from_primary_amine_smiles.append(i)
+            # self.smiles_to_keep = [item for i, item in enumerate(primary_amine_smiles) if i not in inds_to_remove_from_primary_amine_smiles]
+            # # Randomly removing 17 cases where condition 0 is top-yielding
+            # random_removal = [0, 1, 2, 3, 4, 5, 8, 9, 11, 12, 13, 15, 16, 17, 21, 22, 24] # the first array when you run np.random.seed(42) \n sorted(np.random.choice(27, size=17, replace=False))
+            # counter = 0
+            # inds_to_further_remove = []
+            # temp_y_array = self.df[self.df["BB SMILES"].isin(self.smiles_to_keep)].iloc[:, -1].to_numpy().flatten().reshape(len(self.smiles_to_keep),4)
+            # for i, row in enumerate(temp_y_array) :
+            #     if np.argmax(row) == 0  :
+            #         if counter in random_removal :
+            #             inds_to_further_remove.append(i)
+            #         counter += 1
+            # self.smiles_to_keep = [item for i, item in enumerate(self.smiles_to_keep) if i not in inds_to_further_remove]
+            # temp_y_array = self.df[self.df["BB SMILES"].isin(self.smiles_to_keep)].iloc[:, -1].to_numpy().flatten().reshape(len(self.smiles_to_keep),4)
             self.validation_rows = [i for i, item in enumerate(self.smiles_list) if item not in self.smiles_to_keep]            
         elif self.component_to_rank == "sulfonamide":
             self.df = raw_data[raw_data["Chemistry"] == "Sulfonamide"].reset_index()
-            self.validation_rows = joblib.load(
-                "datasets/natureHTE/nature_sulfon_inds_to_remove.joblib"
-            )
+            # self.validation_rows = joblib.load(
+            #     "datasets/natureHTE/nature_sulfon_inds_to_remove.joblib"
+            # )
+            self.validation_rows = []
         elif self.component_to_rank == "amide":
             self.df = raw_data[raw_data["Chemistry"] == "Amide"].reset_index()
             self.smiles_list = self.df["BB SMILES"].unique().tolist()
@@ -178,16 +180,15 @@ class NatureDataset(Dataset):
                 .to_numpy()
                 .reshape(48, 4)
             ):
-                # if len(np.where(row == 100)[0]) <= 1 and np.nansum(row) > 0:
-                #     rows_to_keep.append(i)
                 if len(np.unique(row)) == len(row) :
                     rows_to_keep.append(i)
                 else:
                     self.validation_rows.append(i)
-            # # Removing rows that bias toward a specific condition
-            # further_remove = [23, 21, 9, 6]
-            # for a in further_remove:
-            #     self.validation_rows.append(rows_to_keep.pop(a))
+                # For Table S1 - comment out four rows above and uncomment the four rows below
+                # if len(np.unique(row)) == 1 or np.sum(np.isnan(row)) > 0 :
+                #     self.validation_rows.append(i)
+                # else :
+                #     rows_to_keep.append(i)
         self.smiles_list = self.df["BB SMILES"].unique().tolist()
         self.cats = self.df["Catalyst"].unique().tolist()
         self.bases = self.df["Base"].unique().tolist()
@@ -704,19 +705,35 @@ class InformerDataset(Dataset):
     def X_onehot(self):
         "Prepares onehot arrays."
         substrate_onehot_array = np.identity(len(self.smiles_list))
-        photocat_onehot_array = np.repeat(np.identity(5), 8, axis=0)
-        cat_ratio_onehot_array = np.tile(np.identity(4), (10, 1))
-        amine_ratio_onehot_array = np.tile(np.repeat(np.identity(2), 4, axis=0), (5, 1))
-        self._X_onehot = self._split_arrays(
-            substrate_onehot_array,
-            np.hstack(
-                (
-                    photocat_onehot_array,
-                    cat_ratio_onehot_array,
-                    amine_ratio_onehot_array,
-                )
-            ),
-        )
+        photocat_onehot_array = np.identity(5) # 5 photocatalysts
+        
+        if self.for_regressor :
+            condition_array = np.hstack((
+                np.repeat(photocat_onehot_array, self.n_rank_component//5, axis=0),
+                np.tile(np.identity(self.n_rank_component//5), (5, 1))
+            ))
+            self._X_onehot = np.hstack((
+                np.repeat(substrate_onehot_array, condition_array.shape[0], axis=0),
+                np.tile(condition_array, (substrate_onehot_array.shape[0], 1))
+            )) #for x in range(self.n_non_rank_component)]
+
+        else :
+            self._X_onehot = [substrate_onehot_array for x in range(self.n_non_rank_component)]
+        # if self.for_regressor :
+        #     self._X_onehot = self._split_arrays(
+        #         np.hstack(
+        #             (
+        #                 substrate_onehot_array,
+        #                 photocat_onehot_array,
+        #                 # cat_ratio_onehot_array,
+        #                 amine_ratio_onehot_array,
+        #             )
+        #         ),
+        #     )
+        # else :
+        #     self._X_onehot = self._split_arrays(
+        #         substrate_onehot_array
+        #     )
         return self._X_onehot
 
     @property
@@ -1477,30 +1494,71 @@ class UllmannDataset(Dataset):
                 and row["Ligands"][-2] != "_"
                 and int(row["Ligands"][-2:]) >= 19
             ):
-                if self.for_regressor:
+                if row["Product"] not in prods:
                     desc_rows.append(
                         np.concatenate(
                             (
                                 arbr_lookup[row["Aryl_Bromide"]],
                                 amine_lookup[row["Amine"]],
-                                ligand_lookup[row["Ligands"]],
                             )
                         ).reshape(1, -1)
                     )
-                else:
-                    if row["Product"] not in prods:
-                        desc_rows.append(
-                            np.concatenate(
-                                (
-                                    arbr_lookup[row["Aryl_Bromide"]],
-                                    amine_lookup[row["Amine"]],
-                                )
-                            ).reshape(1, -1)
-                        )
-                        prods.append(row["Product"])
-        self._X_desc = np.vstack(tuple(desc_rows))
+                    prods.append(row["Product"])
+        if not self.for_regressor :
+            self._X_desc = np.vstack(tuple(desc_rows))
+        else :
+            cat_desc = np.vstack(tuple([ligand_lookup[f"Ligand_{x}"] for x in range(19, 37)]))
+            subs_desc = np.vstack(tuple(desc_rows))
+            self._X_desc = np.hstack((
+                np.repeat(subs_desc, 18, axis=0),
+                np.tile(cat_desc, (subs_desc.shape[0], 1))
+            ))
         return self._X_desc
 
+    @property
+    def X_random(self) :
+        np.random.seed(42)
+        rand_arbr_lookup = {
+            row["Compound_Name"]: np.random.rand(len(row.iloc[2:].to_numpy().flatten()))
+            for _, row in self.arbr_desc.iterrows()
+        }
+        rand_amine_lookup = {
+            row["Compound_Name"]: np.random.rand(len(row.iloc[2:].to_numpy().flatten()))
+            for _, row in self.amine_desc.iterrows()
+        }
+        rand_ligand_lookup = {
+            row["Compound_Name"]: np.random.rand(len(row.iloc[2:].to_numpy().flatten()))
+            for _, row in self.ligand_desc.iterrows()
+        }
+        desc_rows = []
+        prods = []
+        for i, row in self.rxn_df.iterrows():
+            if (
+                int(row["Product"][1:]) < 200
+                and row["Ligands"][-2] != "_"
+                and int(row["Ligands"][-2:]) >= 19
+            ):
+                if row["Product"] not in prods:
+                    desc_rows.append(
+                        np.concatenate(
+                            (
+                                rand_arbr_lookup[row["Aryl_Bromide"]],
+                                rand_amine_lookup[row["Amine"]],
+                            )
+                        ).reshape(1, -1)
+                    )
+                    prods.append(row["Product"])
+        if not self.for_regressor :
+            self._X_random = np.vstack(tuple(desc_rows))
+        else :
+            cat_desc = np.vstack(tuple([rand_ligand_lookup[f"Ligand_{x}"] for x in range(19, 37)]))
+            subs_desc = np.vstack(tuple(desc_rows))
+            self._X_random = np.hstack((
+                np.repeat(subs_desc, 18, axis=0),
+                np.tile(cat_desc, (subs_desc.shape[0], 1))
+            ))
+        return self._X_random
+    
     @property
     def X_onehot(self):
         "Prepares onehot arrays."
@@ -1518,38 +1576,30 @@ class UllmannDataset(Dataset):
                     if row["Product"] not in prod_list:
                         onehot_rows.append(row[1:3])
                         prod_list.append(row["Product"])
-        ohe = OneHotEncoder(handle_unknown="ignore")
+        ohe = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
         self._X_onehot = ohe.fit_transform(onehot_rows)
         self._ohe = ohe
         return self._X_onehot
 
     @property
     def y_yield(self):
-        if self.for_regressor:
-            y_list = []
-            for i, row in self.rxn_df.iterrows():
-                if (
-                    int(row["Product"][1:]) < 200
-                    and row["Ligands"][-2] != "_"
-                    and int(row["Ligands"][-2:]) >= 19
-                ):
-                    y_list.append(row["Yield"])
-            self._y_yield = np.array(y_list)
-        else:
-            all_prods = self.rxn_df["Product"].unique()
-            prods = [x for x in all_prods if int(x[1:]) < 200]
-            y_array = -1 * np.ones((len(prods), 18))  # 18 : L19 ~ L36
-            for i, row in self.rxn_df.iterrows():
-                if (
-                    int(row["Product"][1:]) < 200
-                    and row["Ligands"][-2] != "_"
-                    and int(row["Ligands"][-2:]) >= 19
-                ):
-                    y_array[
-                        prods.index(row["Product"]), int(row["Ligands"][-2:]) - 19
-                    ] = row["Yield"]
-            y_array[y_array < 0] = np.nan
+        all_prods = self.rxn_df["Product"].unique()
+        prods = [x for x in all_prods if int(x[1:]) < 200]
+        y_array = -1 * np.ones((len(prods), 18))  # 18 : L19 ~ L36
+        for i, row in self.rxn_df.iterrows():
+            if (
+                int(row["Product"][1:]) < 200
+                and row["Ligands"][-2] != "_"
+                and int(row["Ligands"][-2:]) >= 19
+            ):
+                y_array[
+                    prods.index(row["Product"]), int(row["Ligands"][-2:]) - 19
+                ] = row["Yield"]
+        y_array[y_array < 0] = np.nan
+        if not self.for_regressor :
             self._y_yield = y_array
+        else :
+            self._y_yield = y_array.flatten()
         return self._y_yield
 
     @property
@@ -1666,8 +1716,11 @@ class BorylationDataset(Dataset):
     @property
     def X_onehot(self):
         "Prepares onehot arrays."
-        ohe = OneHotEncoder(handle_unknown="ignore")
-        self._X_onehot = ohe.fit_transform(self.df.iloc[:, :3])
+        ohe = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+        if self.for_regressor : 
+            self._X_onehot = ohe.fit_transform(self.df.iloc[:, :3])
+        else :
+            self._X_onehot = ohe.fit_transform(self.df.iloc[:, 0].unique().reshape(-1,1))
         self._ohe = ohe
         return self._X_onehot
 
@@ -1717,7 +1770,6 @@ class ArylBorylationDataset(Dataset):
         self.ligand_inchi = list(rxn_df["Ligand_inchi"].unique())
         self.substrate_inchi = list(rxn_df["Electrophile_inchi"].unique())
         self.substrate_list = [rxn_df[rxn_df["Electrophile_inchi"]==x]["Electrophile"].values[0] for x in self.substrate_inchi]
-        # print(self.substrate_list)
         self.train_together = False
         self.n_rank_component = len(self.ligand_list)
 
@@ -1737,7 +1789,8 @@ class ArylBorylationDataset(Dataset):
             substrate_portion = rxn_df[rxn_df["Electrophile"]==substrate].iloc[0, :28]
             ligand_portion = rxn_df[rxn_df["Ligand"]==ligand].iloc[0,28:-1] # we don't care about the produc and solvent inchi
             rows_to_add.append(pd.concat([substrate_portion, ligand_portion, pd.Series({"Yield":0})]).to_frame().T)
-        self.rxn_df = pd.concat([rxn_df, *rows_to_add], ignore_index=True)
+        concat_df = pd.concat([rxn_df, *rows_to_add], ignore_index=True)
+        self.rxn_df = concat_df[concat_df["Electrophile"]!="4-Chloro-2-fluoroanisole"]
         yield_array[yield_array < 0] = 0
         self.yield_array = yield_array
 
@@ -1783,25 +1836,46 @@ class ArylBorylationDataset(Dataset):
     def X_desc(self):
         """Prepares array of descriptors as prepared by the authors."""
         if self.for_regressor :
-            self._X_desc = self.rxn_df.drop(['Electrophile_inchi', 'Solvent_inchi', 'Ligand_inchi', 'Product_inchi', 'Electrophile', 'Ligand', "Yield"], axis = 1).to_numpy()
+            self._X_desc = self.rxn_df.drop(
+                ['Electrophile_inchi', 'Solvent_inchi', 'Ligand_inchi', 'Product_inchi', 'Electrophile', 'Ligand', "Yield"],
+                axis = 1
+            ).to_numpy()
         else :
-            self._X_desc = np.unique(self.rxn_df.iloc[:, :26].to_numpy(dtype=np.float16), axis=0)
+            self._X_desc = np.unique(self.rxn_df.iloc[:, :26].to_numpy(dtype=np.float16), axis=0) # substrate descriptors
         return self._X_desc
 
     @property
     def X_onehot(self):
         "Prepares onehot arrays."
-        ohe = OneHotEncoder(handle_unknown="ignore")
+        ohe = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
         if self.for_regressor :
             self._X_onehot = ohe.fit_transform(self.rxn_df.loc[:, ["Electrophile", "Ligand"]])
         else :
             self._X_onehot = ohe.fit_transform(self.rxn_df.loc[:, "Electrophile"].to_numpy().reshape(-1,1))
         return self._X_onehot
+    
+    @property
+    def X_random(self):
+        np.random.seed(42)
+        random_substrate_desc = np.random.rand(len(self.substrate_inchi), 26)
+        if self.for_regressor :
+            column_list = list(self.rxn_df.columns)
+            n_ligand_desc = column_list.index("Ligand") - column_list.index("Electrophile_inchi") - 1
+            random_ligand_desc = np.random.rand(len(self.ligand_inchi), n_ligand_desc)
+            self._X_random = np.hstack((
+                np.repeat(random_substrate_desc, random_ligand_desc.shape[0], axis=0),
+                np.tile(random_ligand_desc, (random_substrate_desc.shape[0], 1))
+            ))
+        else :
+            self._X_random = random_substrate_desc
+        return self._X_random
+
 
     @property
     def y_yield(self):
         if self.for_regressor:
-            self._y_yield = self.rxn_df["Yield"].to_numpy().flatten()
+            # self._y_yield = self.rxn_df["Yield"].to_numpy().flatten()
+            self._y_yield = self.yield_array.flatten()
         else:
             self._y_yield = self.yield_array
         return self._y_yield

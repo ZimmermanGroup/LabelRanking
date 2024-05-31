@@ -524,20 +524,47 @@ class BaselineEvaluator(Evaluator):
         if type(self.outer_cv) == list:
             self.perf_dict = []
             for i, (array, cv) in enumerate(zip(y, self.outer_cv)):
-                perf_dict = deepcopy(PERFORMANCE_DICT)
+                perf_dict = {
+                    "kendall_tau": [],
+                    "reciprocal_rank": [],
+                    "mean_reciprocal_rank": [],
+                    "regret": [],
+                    "test_compound": [],
+                    "model": [],
+                    "evaluation_loop":[]
+                }
+
                 self._CV_loops(
                     perf_dict, cv, None, array, self._processing_before_logging
                 )
                 self.perf_dict.append(perf_dict)
         else:
-            self.perf_dict = deepcopy(PERFORMANCE_DICT)
+            self.perf_dict = {
+                "kendall_tau": [],
+                "reciprocal_rank": [],
+                "mean_reciprocal_rank": [],
+                "regret": [],
+                "test_compound": [],
+                "model": [],
+                "evaluation_loop":[]
+            }
+
             self._CV_loops(
                 self.perf_dict, self.outer_cv, None, y, self._processing_before_logging
             )
         return self
 
     def external_validation(self):
-        self.valid_dict = deepcopy(PERFORMANCE_DICT)
+        self.valid_dict = {
+            "kendall_tau": [],
+            "reciprocal_rank": [],
+            "mean_reciprocal_rank": [],
+            "regret": [],
+            "test_compound": [],
+            "model": [],
+            "evaluation_loop":[]
+        }
+
         y_train = self.dataset.y_yield
         y_valid = self.dataset.y_valid
         self._evaluate_alg(
@@ -700,7 +727,16 @@ class MulticlassEvaluator(Evaluator):
             for i, (X_array, array, yield_array, cv) in enumerate(
                 zip(X, y, y_yield, self.outer_cv)
             ):  # X is not included as it remains the same across different reagents
-                perf_dict = deepcopy(PERFORMANCE_DICT)
+                perf_dict = {
+                    "kendall_tau": [],
+                    "reciprocal_rank": [],
+                    "mean_reciprocal_rank": [],
+                    "regret": [],
+                    "test_compound": [],
+                    "model": [],
+                    "evaluation_loop":[]
+                }
+
                 self._CV_loops(
                     perf_dict,
                     cv,
@@ -712,7 +748,16 @@ class MulticlassEvaluator(Evaluator):
                 self.perf_dict.append(perf_dict)
         else:
             y = np.argmin(y_rank, axis=1)
-            perf_dict = deepcopy(PERFORMANCE_DICT)
+            perf_dict = {
+                "kendall_tau": [],
+                "reciprocal_rank": [],
+                "mean_reciprocal_rank": [],
+                "regret": [],
+                "test_compound": [],
+                "model": [],
+                "evaluation_loop":[]
+            }
+
             self._CV_loops(
                 perf_dict,
                 self.outer_cv,
@@ -725,7 +770,16 @@ class MulticlassEvaluator(Evaluator):
         return self
 
     def external_validation(self):
-        self.valid_dict = deepcopy(PERFORMANCE_DICT)
+        self.valid_dict = {
+            "kendall_tau": [],
+            "reciprocal_rank": [],
+            "mean_reciprocal_rank": [],
+            "regret": [],
+            "test_compound": [],
+            "model": [],
+            "evaluation_loop":[]
+        }
+
         y_rank_train = self.dataset.y_label
         y_rank_valid = self.dataset.y_valid
         y_yield_train = self.dataset.y_yield
@@ -896,7 +950,16 @@ class MultilabelEvaluator(MulticlassEvaluator):
             for i, (X_array, array, yield_array, cv) in enumerate(
                 zip(X, y_label, y_yield, self.outer_cv)
             ):  # X is not included as it remains the same across different reagents
-                perf_dict = deepcopy(PERFORMANCE_DICT)
+                perf_dict = {
+                    "kendall_tau": [],
+                    "reciprocal_rank": [],
+                    "mean_reciprocal_rank": [],
+                    "regret": [],
+                    "test_compound": [],
+                    "model": [],
+                    "evaluation_loop":[]
+                }
+
                 self._CV_loops(
                     perf_dict,
                     cv,
@@ -907,7 +970,16 @@ class MultilabelEvaluator(MulticlassEvaluator):
                 )
                 self.perf_dict.append(perf_dict)
         else:
-            perf_dict = deepcopy(PERFORMANCE_DICT)
+            perf_dict = {
+                "kendall_tau": [],
+                "reciprocal_rank": [],
+                "mean_reciprocal_rank": [],
+                "regret": [],
+                "test_compound": [],
+                "model": [],
+                "evaluation_loop":[]
+            }
+
             self._CV_loops(
                 perf_dict,
                 self.outer_cv,
@@ -983,7 +1055,15 @@ class LabelRankingEvaluator(Evaluator):
             for i, (X_array, array, yield_array, cv) in enumerate(
                 zip(X, y, y_yield, self.outer_cv)
             ):  # X is not included as it remains the same across different reagents
-                perf_dict = deepcopy(PERFORMANCE_DICT)
+                perf_dict = {
+                    "kendall_tau": [],
+                    "reciprocal_rank": [],
+                    "mean_reciprocal_rank": [],
+                    "regret": [],
+                    "test_compound": [],
+                    "model": [],
+                    "evaluation_loop":[]
+                }
                 self._CV_loops(
                     perf_dict,
                     cv,
@@ -994,7 +1074,15 @@ class LabelRankingEvaluator(Evaluator):
                 )
                 self.perf_dict.append(perf_dict)
         else:
-            perf_dict = deepcopy(PERFORMANCE_DICT)
+            perf_dict = {
+                "kendall_tau": [],
+                "reciprocal_rank": [],
+                "mean_reciprocal_rank": [],
+                "regret": [],
+                "test_compound": [],
+                "model": [],
+                "evaluation_loop":[]
+            }
             self._CV_loops(
                 perf_dict,
                 self.outer_cv,
@@ -1007,7 +1095,16 @@ class LabelRankingEvaluator(Evaluator):
         return self
 
     def external_validation(self):
-        self.valid_dict = deepcopy(PERFORMANCE_DICT)
+        self.valid_dict = {
+            "kendall_tau": [],
+            "reciprocal_rank": [],
+            "mean_reciprocal_rank": [],
+            "regret": [],
+            "test_compound": [],
+            "model": [],
+            "evaluation_loop":[]
+        }
+
         X_train = self._load_X()
         X_valid = self.dataset.X_valid
         y_rank_train = self.dataset.y_ranking
@@ -1107,7 +1204,16 @@ class RegressorEvaluator(Evaluator):
         ):  # When one component is ranked but the dataset is separated by the other component (deoxy, informer)
             self.perf_dict = []
             for i, (array, cv) in enumerate(zip(y, self.outer_cv)):
-                perf_dict = deepcopy(PERFORMANCE_DICT)
+                perf_dict = {
+                    "kendall_tau": [],
+                    "reciprocal_rank": [],
+                    "mean_reciprocal_rank": [],
+                    "regret": [],
+                    "test_compound": [],
+                    "model": [],
+                    "evaluation_loop":[]
+                }
+
                 self._CV_loops(
                     perf_dict,
                     cv,
@@ -1119,8 +1225,17 @@ class RegressorEvaluator(Evaluator):
                 self.perf_dict.append(perf_dict)
         # cases when both reaction components are ranked simultaneously
         else:
-            perf_dict = PERFORMANCE_DICT
-            print("y shape", y.shape, X.shape)
+            perf_dict = {
+                "kendall_tau": [],
+                "reciprocal_rank": [],
+                "mean_reciprocal_rank": [],
+                "regret": [],
+                "test_compound": [],
+                "model": [],
+                "evaluation_loop":[]
+            }
+
+            # print("y shape", y.shape, X.shape)
             self._CV_loops(
                 perf_dict,
                 self.outer_cv,
