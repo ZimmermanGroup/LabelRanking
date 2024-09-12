@@ -299,6 +299,8 @@ def load_result(dataset, model1, model2):
         filename = f"performance_excels/natureHTE/desc_{dataset.split('_')[1]}_None.xlsx"
     elif "science" in dataset :
         filename = f"performance_excels/scienceMALDI/desc_whole_{dataset.split('_')[1]}_None.xlsx"
+    elif "ullmann" in dataset :
+        filename = f"performance_excels/ullmann/desc_None_None.xlsx"
     result_df = pd.read_excel(filename)
     model1_df = result_df[result_df["model"]==model1]
     model2_df = result_df[result_df["model"]==model2]
