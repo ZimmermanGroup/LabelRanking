@@ -19,6 +19,8 @@ Includes borda and soft rank aggregation methods used for label ranking algorith
    Onehot, fingerprint or descriptor (if available) input arrays and ranking, yield, output arrays etc. can be accessed as attributes.
 * datasets folder:
 includes the raw datasets.
+* dataset_structure_analysis.ipynb:
+analyzing the portion of each reaction condition being the top-performant, plots that are in the first half of the supporting info.
 
 4. evaluator.py
 
@@ -33,18 +35,8 @@ includes the raw datasets.
 
 6. performance_analysis.ipynb
 
-   Conducts various analyses on the performance achieved by different algorithms with different datasets with the excel file saved by executor.py.
-* science_data_analysis.ipynb :
-Compares random forest regressors with RPC on the fragment data provided in [*Science*, **2018**, *361*, 1](https://www.science.org/doi/10.1126/science.aar6236).
+   Conducts various analyses on the performance achieved by different algorithms with different datasets with the excel files saved by executor.py.
 
-7. active_query_strategies.py and active_label_ranking.py
-
-   Includes various query strategies and active learning implementation, respectively. 
-* If you want to conduct AL on the natureHTE amine dataset, with the condition-first strategy that selects substrates at regular quantiles of Tanimoto distances from the training set, selecting 3 conditions for 2 substrates, while leaving out 4 test substrates where each reaction conditions are top-class, run the command
-`python active_label_ranking.py --dataset amine --strategy condition_first --substrate_selection quantile --initialization cluster --n_conds_to_sample 3 --n_test_subs 4 -s`
-* al_results.ipynb :
-Draws various plots to analyze and compare the AL results from different strategies.
-
-8. plotting_utils.py
+7. plotting_utils.py
 
    Includes various functions that draw the plots in the jupyter notebooks.
